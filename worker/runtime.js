@@ -7,6 +7,7 @@ export class RubyRuntime {
       throw new Error('PONDRO requires WebAssembly JSPI support');
     }
     this.pending = new Map();
+    this.streamPending = new Set();
     this.nextToken = 1;
     this.busy = false;
     const wasi = {
@@ -37,21 +38,22 @@ export class RubyRuntime {
       wasi_snapshot_preview1: wasi,
       env: { emscripten_notify_memory_growth: () => {} },
       pondro: {
-        rpc_start: (pointer, length) => {
+        async_start: (pointer, length) => {
           const request = JSON.parse(decoder.decode(new Uint8Array(this.instance.exports.memory.buffer, pointer, length)));
           const token = this.nextToken++;
           // Start immediately; retain fulfilled failures to avoid unhandled rejections.
           let started;
-          try { started = Promise.resolve(this.invokeRpc(request)); }
+          try { started = Promise.resolve(this.invokeAsync(request)); }
           catch (error) { started = Promise.reject(error); }
           const promise = started.then(
             value => ({ ok: true, value }),
             error => ({ ok: false, error: error.message ?? String(error) })
           );
           this.pending.set(token, promise);
+          if (request.kind === 'binding' && request.operation?.startsWith('stream.')) this.streamPending.add(token);
           return token;
         },
-        rpc_await: new WebAssembly.Suspending(async token => {
+        async_await: new WebAssembly.Suspending(async token => {
           const pending = this.pending.get(token);
           const result = pending ? await pending : { ok: false, error: 'Unknown Future' };
           return this.writeJSON(result);
@@ -74,10 +76,10 @@ export class RubyRuntime {
     return input;
   }
 
-  async dispatch(event, invokeRpc = () => { throw new Error('Remote RPC is unavailable'); }) {
+  async dispatch(event, invokeAsync = () => { throw new Error('Remote RPC is unavailable'); }, finishEvent = () => {}) {
     if (this.busy) throw new Error('Concurrent dispatch into one Ruby VM is not allowed');
     this.busy = true;
-    this.invokeRpc = invokeRpc;
+    this.invokeAsync = invokeAsync;
     const wasm = this.instance.exports;
     let input = 0;
     let output = 0;
@@ -90,13 +92,20 @@ export class RubyRuntime {
       if (end === -1) throw new Error('Invalid PicoRuby result');
       return JSON.parse(decoder.decode(result.subarray(output, end)));
     } finally {
-      // Even unawaited eager calls finish before the event lifetime ends.
-      await Promise.all(this.pending.values());
-      this.pending.clear();
-      this.invokeRpc = null;
-      this.busy = false;
-      if (output) wasm.free(output);
-      if (input) wasm.free(input);
+      try {
+        // Eager opens finish first, then cancel unawaited reads before joining
+        // them. Waiting for every pending read before cleanup can deadlock.
+        await Promise.all([...this.pending].filter(([token]) => !this.streamPending.has(token)).map(([, promise]) => promise));
+        await finishEvent();
+        await Promise.all(this.pending.values());
+      } finally {
+        this.pending.clear();
+        this.streamPending.clear();
+        this.invokeAsync = null;
+        this.busy = false;
+        if (output) wasm.free(output);
+        if (input) wasm.free(input);
+      }
     }
   }
 

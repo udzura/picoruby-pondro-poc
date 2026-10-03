@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -18,6 +18,23 @@ const base = `http://127.0.0.1:${port}`;
 let process;
 let logs = '';
 const sockets = [];
+
+
+async function seedR2() {
+  const file = join(temporary, 'stream.txt');
+  await writeFile(file, '日本語\n\nfinal');
+  const child = spawn(globalThis.process.execPath, ['node_modules/wrangler/bin/wrangler.js',
+    'r2', 'object', 'put', 'pondro-stream-demo/sample', '--local', '--persist-to', join(temporary, 'state'), '--file', file], {
+    env: { ...globalThis.process.env, WRANGLER_SEND_METRICS: 'false',
+      XDG_CONFIG_HOME: join(temporary, 'config'), XDG_CACHE_HOME: join(temporary, 'cache') },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let output = '';
+  child.stdout.on('data', data => { output += data; });
+  child.stderr.on('data', data => { output += data; });
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, output);
+}
 
 async function start() {
   logs = '';
@@ -45,9 +62,9 @@ async function stop() {
   try { await exited; } finally { clearTimeout(timer); }
 }
 
-async function rpc(klass, id, method) {
+async function rpc(klass, id, method, args = []) {
   const response = await fetch(`${base}/api/${klass}/${id}`, {
-    method: 'POST', body: JSON.stringify({ method }), signal: AbortSignal.timeout(5000)
+    method: 'POST', body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(5000)
   });
   assert.equal(response.status, 200, await response.clone().text());
   return (await response.json()).value;
@@ -70,8 +87,29 @@ async function connect(room, counter = room) {
 }
 
 try {
+  await seedR2();
   await start();
+  assert.deepEqual(await rpc('StreamProbe', 'read', 'read_object', ['sample', 'read_all']), [...new TextEncoder().encode('日本語\n\nfinal')]);
+  assert.deepEqual(await rpc('StreamProbe', 'read', 'read_object', ['sample', 'readline']), [...new TextEncoder().encode('日本語\n')]);
+  assert.equal(await rpc('StreamProbe', 'read', 'read_object', ['missing']), null);
+  const live = new WebSocket(`${base.replace('http:', 'ws:')}/ws/StreamProbe/live`);
+  sockets.push(live);
+  const ready = nextMessage(live);
+  await once(live, 'open');
+  assert.equal((await ready).type, 'ready');
+  const streamed = [];
+  const done = new Promise(resolve => { live.on('message', message => {
+    const event = JSON.parse(message.toString());
+    streamed.push(event);
+    if (event.type === 'done') resolve();
+  }); });
+  live.send('sample');
+  await done;
+  assert.deepEqual(streamed, [{ type: 'line', text: '日本語\n' }, { type: 'line', text: '\n' }, { type: 'line', text: 'final' }, { type: 'done' }]);
   assert.match(await (await fetch(base)).text(), /PONDRO playground/);
+  const note = { kv: "日本語 and 'bound SQL'", d1: "日本語 and 'bound SQL'" };
+  assert.deepEqual(await rpc('BindingProbe', 'note', 'store_note', [note.kv]), note);
+  assert.deepEqual(await rpc('BindingProbe', 'note', 'read_note'), note);
   assert.equal(await rpc('Counter', 'one', 'value'), 0);
   const values = await Promise.all(Array.from({ length: 12 }, () => rpc('Counter', 'one', 'increment')));
   assert.deepEqual(values.sort((a, b) => a - b), Array.from({ length: 12 }, (_, i) => i + 1));
@@ -109,6 +147,7 @@ try {
   const forbidden = await fetch(`${base}/api/Counter/one`, { method: 'POST', body: '{"method":"send"}' });
   assert.equal(forbidden.status, 403);
   assert.equal((await fetch(`${base}/ws/Counter/one`)).status, 400);
+  assert.equal((await fetch(`${base}/ws/BindingProbe/note`)).status, 400);
   assert.equal((await fetch(`${base}/ws/ChatRoom/lobby`)).status, 426);
   const oversized = await fetch(`${base}/api/Counter/one`, { method: 'POST', body: 'x'.repeat(9000) });
   assert.equal(oversized.status, 400);
@@ -121,6 +160,7 @@ try {
   }));
   await stop();
   await start();
+  assert.deepEqual(await rpc('BindingProbe', 'note', 'read_note'), note);
   assert.equal(await rpc('Counter', 'one', 'value'), 12);
   assert.equal(await rpc('Counter', 'speech-total', 'value'), 1);
   const restored = await connect('lobby', 'speech-total');
@@ -141,8 +181,9 @@ try {
   assert.equal(shared.welcome.history.length, 0);
   const historyReader = await connect('lobby', 'speech-total');
   assert.equal(historyReader.welcome.history.length, 2);
-  console.log('PASS: workerd HTTP/RPC, concurrent counters, Future.await across DOs, broadcast, departure, room isolation, Unicode, validation and restart persistence');
+  console.log('PASS: workerd R2 stream reads/WebSocket lines, KV/D1 shared bridge, HTTP/RPC, concurrent counters, Future.await across DOs, broadcast, departure, room isolation, Unicode, validation and restart persistence');
 } catch (error) {
+  await delay(200);
   console.error(logs);
   throw error;
 } finally {

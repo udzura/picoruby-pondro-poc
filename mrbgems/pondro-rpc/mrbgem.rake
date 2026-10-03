@@ -1,6 +1,6 @@
 MRuby::Gem::Specification.new('pondro-rpc') do |spec|
   spec.license = 'MIT'
   spec.author = 'udzura'
-  spec.summary = 'Remote PONDRO references and awaitable Futures'
-  spec.add_dependency 'pondro-core'
+  spec.summary = 'Remote PONDRO references using the shared Future runtime'
+  spec.add_dependency 'pondro-async'
 end

@@ -10,6 +10,14 @@ export class WebSocketAdapter {
 
   handles(type) { return type === 'socket.send' || type === 'socket.close'; }
 
+  invokeSocket(request) {
+    if (request.operation !== 'send' || typeof request.message !== 'string') throw new Error('Invalid socket operation');
+    const socket = this.ctx.getWebSockets().find(s => s.deserializeAttachment().id === request.id);
+    if (!socket) throw new Error('Socket is closed');
+    socket.send(request.message);
+    return null;
+  }
+
   apply(effect) {
     const socket = this.ctx.getWebSockets().find(s => s.deserializeAttachment().id === effect.id);
     if (!socket) return;

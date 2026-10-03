@@ -6,24 +6,24 @@
 
 static mrb_state *vm;
 
-__attribute__((import_module("pondro"), import_name("rpc_start")))
-extern int pondro_rpc_start(const char *json, int length);
-__attribute__((import_module("pondro"), import_name("rpc_await")))
-extern char *pondro_rpc_await(int token);
+__attribute__((import_module("pondro"), import_name("async_start")))
+extern int pondro_async_start(const char *json, int length);
+__attribute__((import_module("pondro"), import_name("async_await")))
+extern char *pondro_async_await(int token);
 
-static mrb_value rpc_start(mrb_state *mrb, mrb_value self)
+static mrb_value async_start(mrb_state *mrb, mrb_value self)
 {
   mrb_value json;
   mrb_get_args(mrb, "S", &json);
-  return mrb_int_value(mrb, pondro_rpc_start(RSTRING_PTR(json), RSTRING_LEN(json)));
+  return mrb_int_value(mrb, pondro_async_start(RSTRING_PTR(json), RSTRING_LEN(json)));
 }
 
-static mrb_value rpc_await(mrb_state *mrb, mrb_value self)
+static mrb_value async_await(mrb_state *mrb, mrb_value self)
 {
   mrb_int token;
   mrb_get_args(mrb, "i", &token);
-  char *json = pondro_rpc_await(token);
-  if (!json) mrb_raise(mrb, E_RUNTIME_ERROR, "RPC result allocation failed");
+  char *json = pondro_async_await(token);
+  if (!json) mrb_raise(mrb, E_RUNTIME_ERROR, "Async result allocation failed");
   mrb_value result = mrb_str_new_cstr(mrb, json);
   free(json);
   return result;
@@ -65,7 +65,7 @@ void pondro_destroy(void)
 void mrb_pondro_wasm_gem_init(mrb_state *mrb)
 {
   struct RClass *pondro = mrb_module_get(mrb, "Pondro");
-  mrb_define_module_function(mrb, pondro, "__rpc_start", rpc_start, MRB_ARGS_REQ(1));
-  mrb_define_module_function(mrb, pondro, "__rpc_await", rpc_await, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, pondro, "__async_start", async_start, MRB_ARGS_REQ(1));
+  mrb_define_module_function(mrb, pondro, "__async_await", async_await, MRB_ARGS_REQ(1));
 }
 void mrb_pondro_wasm_gem_final(mrb_state *mrb) { (void)mrb; }

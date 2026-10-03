@@ -3,11 +3,12 @@ import module from '../dist/pondro.wasm';
 import { RubyRuntime } from './runtime.js';
 import { PondroHost } from './host.js';
 import { WebSocketAdapter } from './adapters/websocket.js';
+import { BindingAdapter } from './adapters/bindings.js';
 
 const MAX_BODY_BYTES = 8192;
 
 function route(url) {
-  const match = url.pathname.match(/^\/(api|ws)\/(Counter|ChatRoom)\/([^/]+)$/);
+  const match = url.pathname.match(/^\/(api|ws)\/(Counter|ChatRoom|BindingProbe|StreamProbe)\/([^/]+)$/);
   if (!match) return null;
   const id = decodeURIComponent(match[3]);
   if (!id || id.length > 128) throw new Error('Invalid object ID');
@@ -42,8 +43,9 @@ async function readPayload(request) {
 export class PondroObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.host = new PondroHost(ctx, new RubyRuntime(module), [], async (request, chain) => {
-      if (!['Counter', 'ChatRoom'].includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
+    const bindings = new BindingAdapter(env, { CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai' });
+    this.host = new PondroHost(ctx, new RubyRuntime(module), [bindings], async (request, chain) => {
+      if (!['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe'].includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
         throw new Error('Invalid remote PONDRO identity');
       }
       const id = env.PONDRO.idFromName(JSON.stringify([request.class, request.id]));
@@ -56,7 +58,7 @@ export class PondroObject extends DurableObject {
           new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('Remote PONDRO RPC timed out')), 10000); })
         ]);
       } finally { clearTimeout(timer); }
-    });
+    }, bindings);
     this.websocket = new WebSocketAdapter(ctx, this.host);
     this.host.adapters.push(this.websocket);
   }

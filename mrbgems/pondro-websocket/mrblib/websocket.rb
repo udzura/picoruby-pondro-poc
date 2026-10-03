@@ -14,6 +14,12 @@ module Pondro
       nil
     end
 
+    # Opt-in immediate delivery, before the local snapshot commit.
+    def send_now(message)
+      raise ArgumentError, 'Expected a text message' unless message.is_a?(String)
+      Future.new({ 'kind' => 'socket', 'operation' => 'send', 'id' => id, 'message' => message })
+    end
+
     def close(code = 1000, reason = '')
       unless code == 1000 || (code >= 3000 && code <= 4999)
         raise ArgumentError, 'Invalid close code'

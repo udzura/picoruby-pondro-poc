@@ -8,7 +8,8 @@
     "dev": "wrangler dev",
     "test": "node --test test/*.test.js",
     "test:ruby": "ruby test/core_test.rb && ruby test/future_test.rb",
-    "test:e2e": "node test/e2e.mjs"
+    "test:e2e": "node test/e2e.mjs",
+    "sync:bridge": "ruby scripts/sync_bridge.rb"
   },
   "devDependencies": {
     "wrangler": "4.147.0",

@@ -104,19 +104,24 @@ that boundary on both sides of Wasm:
 | --- | --- |
 | `mrbgems/pondro-core` | `Pondro::Object`, identity, state DSL, RPC allowlist, class registry, generic event dispatch |
 | `mrbgems/pondro-websocket` | Opt-in Ruby callbacks and connection-ID proxies |
-| `mrbgems/pondro-rpc` | Remote object references and awaitable Futures |
-| `mrbgems/pondro-wasm` | C ABI, JSPI RPC imports and an event-driven task HAL for PicoRuby |
+| `mrbgems/pondro-async` | Event-local eager Futures, shared by RPC and binding calls |
+| `mrbgems/pondro-rpc` | Remote object references |
+| `mrbgems/pondro-bindings` | KV, D1, R2 and AI proxies, plus read-only Streams |
+| `mrbgems/pondro-wasm` | C ABI, JSPI async imports and an event-driven task HAL for PicoRuby |
 | `mrbgems/pondro-example` | Plain Counter and WebSocket ChatRoom |
 | `worker/runtime.js` | Wasm instantiation and UTF-8 JSON/memory handling |
 | `worker/host.js` | State restore/commit and generic adapter effects |
 | `worker/adapters/websocket.js` | Cloudflare upgrade, hibernation attachments and socket delivery |
+| `worker/adapters/bindings.js` | Connects Pondro Futures to the existing Cloudflare host dispatcher |
+| `worker/upstream/` | Unmodified, pinned Worker host codec/dispatcher and MIT license |
 | `worker/index.js` | HTTP routing and Durable Object lifecycle hooks |
 | `public/` | Vanilla JS demo frontend |
 
 The build config loads the local directories as mgems. `pondro-core` has no
 WebSocket dependency. A core-only application can omit `pondro-websocket` and
 replace `pondro-example` with its own application mgem. Remote references can
-also be omitted by leaving out `pondro-rpc`. This demo links all three.
+also be omitted by leaving out `pondro-rpc`. Binding access is optional through
+`pondro-bindings`; both use `pondro-async`. This demo links all of them.
 The JS upgrade adapter queries Ruby capabilities, so Ruby's `use` declaration
 determines whether an object accepts WebSocket connections.
 
@@ -168,8 +173,8 @@ Repeated await/read returns the cached value or raises the same cached
 `Pondro::RemoteError`; it does not issue another RPC. Futures are event-local,
 not durable tasks: do not save them in `state`.
 
-The C bridge imports a synchronous `pondro.rpc_start` and a suspending
-`pondro.rpc_await`. JS starts the Durable Object stub's `invoke` RPC and retains
+The C bridge imports a synchronous `pondro.async_start` and a suspending
+`pondro.async_await`. JS starts the Durable Object stub's `invoke` RPC and retains
 its Promise under a token. `WebAssembly.Suspending` wraps the await import and
 `WebAssembly.promising` wraps the dispatch export, preserving the Ruby/C/Wasm
 stack while the Promise resolves. These wrappers are supplied by our standalone
@@ -193,7 +198,7 @@ or exactly-once guarantees. Call chains reject self-calls and cycles within
 the propagated chain and are limited to 16 objects. Remote calls have a
 10-second timeout, also bounding independently initiated wait cycles between
 busy objects. Timeout does not cancel a remote operation: it may still complete
-and change remote state. The demo's JS resolver supports Counter and ChatRoom;
+and change remote state. The demo's JS resolver supports Counter, ChatRoom and BindingProbe;
 adding another Ruby class also requires adding it to the JS routing/resolver.
 
 The JS adapter uses Cloudflare's hibernation API (`acceptWebSocket`,
@@ -202,6 +207,114 @@ IDs and object identity live in attachments, so callbacks can reconstruct Ruby
 proxies after activation without an in-memory socket map. See the official
 [WebSocket hibernation documentation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 and [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
+
+## Other Cloudflare bindings
+
+The integration reuses the host-call codec and dispatcher from
+[picoruby-cloudflare-worker-wasm](https://github.com/udzura/picoruby-cloudflare-worker-wasm).
+`worker/upstream/source.json` pins revision `63e2611d9c56d046ebcfd5b83837cdecaed060ba`
+and SHA-256 checksums. The JS sources are copied without modification, with their
+MIT license; `npm run sync:bridge` retrieves and verifies the pinned snapshot.
+No Emscripten-generated JS, Rack lifecycle or upstream C runtime is loaded.
+
+```ruby
+class MyObject < Pondro::Object
+  use Pondro::Bindings
+
+  def load_profile(user_id)
+    cached = bindings[:CACHE].get(user_id)
+    stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?')
+                         .bind(user_id).first('body')
+    { 'kv' => cached.await, 'd1' => stored.await }
+  rescue Pondro::BindingError => error
+    { 'error' => error.message }
+  end
+end
+```
+
+KV `get` and `put(key, text, ttl: nil)` return eager Futures. Missing values return
+`nil`, empty values return `''`, and writes return `nil`. This adapter supports
+UTF-8 text only; invalid UTF-8 results fail rather than replacing bytes.
+D1 uses explicit `prepare` and immutable `bind` statements with `run`, `first`
+(optional column) and `raw(column_names: false)`, each returning a Future.
+The shared dispatcher checks arguments, TTL, scalar parameters, binding types
+and errors. Binding failures raise a cached `Pondro::BindingError` on await.
+
+`worker/index.js` passes an explicit registry (`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`) to the
+adapter and exposes it as Ruby proxy metadata. The adapter allows KV get/put, D1 execution, R2 get, AI run and read-only stream
+operations. R2 writes, stream output and arbitrary host operations are not exposed. Add real KV/D1
+resource IDs to `wrangler.jsonc` before deployment; the included IDs are local
+demo placeholders. Setup and tests do not create Cloudflare resources.
+
+The `BindingProbe` sample creates a D1 table and writes a note into D1 and KV:
+
+```sh
+curl -X POST http://localhost:8787/api/BindingProbe/note \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"store_note","args":["hello bindings"]}'
+# {"value":{"kv":"hello bindings","d1":"hello bindings"}}
+```
+
+Call `read_note` afterward to read both stores; run `store_note` first to create
+the table. External binding effects do not roll back with the local DO snapshot,
+and writes across KV/D1 are not atomic. Local KV tests permit immediate reads;
+production KV consistency may return a previous value after a write.
+A shared upstream mgem extraction remains future work; the dependency is currently
+a reproducible JS snapshot. Readable streams are owned by the current event.
+
+## Reading R2 and AI streams
+
+Registered bindings also support dot access: `bindings.AI` is equivalent to
+`bindings[:AI]`. Existing Ruby method names still require `[]` access.
+
+```ruby
+object = bindings[:BUCKET].get('sample').await
+stream = object.body # nil when the object has no body; get returns nil if missing
+
+while (line = stream.readline.await)
+  socket.send_now(line).await
+end
+
+ai_stream = bindings.AI.generate(model, { 'prompt' => 'hello' }, stream: true).await
+chunk = ai_stream.read_partial(1024).await
+rest = ai_stream.read_all(max_bytes: 65_536).await
+ai_stream.close.await
+```
+
+R2 results expose `metadata` and a readable `body`. AI `run` is model-agnostic;
+`generate(..., stream: true)` requests a stream, while its default returns JSON.
+The sample registry includes AI, but `wrangler.jsonc` leaves the AI resource
+unconfigured. Add the appropriate AI binding to use a real model; tests use a
+mock AI binding and do not call paid or remote inference.
+
+| Read operation | Result |
+| --- | --- |
+| `read_partial(n).await` | Available bytes up to n; does not wait to fill n; nil at EOF |
+| `readline(max_bytes: 1_048_576).await` | Includes newline; preserves CRLF and blank lines; returns the final unterminated line; nil at EOF |
+| `read_all(max_bytes: 1_048_576).await` | All remaining bytes; empty string at EOF; fails and cancels on overflow |
+| `close.await` | Cancels and releases the source; safe to repeat |
+
+All read limits are capped at 1 MiB; `read_partial` needs a positive integer.
+Reads on the same stream are serialized and share leftover bytes. Lines and
+chunks are binary Ruby strings: byte arrays cross the existing JSON/Future ABI,
+then `mruby-pack` reconstructs the bytes without UTF-8 decoding or replacement.
+Only send text once complete UTF-8 has been assembled. AI streaming bytes are
+raw output (typically SSE), not parsed generation tokens.
+
+The host cancels unread streams after each event, including failed events and
+unawaited eager opens. Opens finish first; unawaited pending reads are canceled
+before joining their Futures, so cleanup does not wait forever for incoming data. Handles never survive to the next event and must not be
+saved in state. Source errors propagate as `Pondro::BindingError`.
+The unchanged upstream dispatcher validates R2/AI and produces stream descriptors;
+a per-call wrapper captures the actual source for Pondro's event-owned read
+registry. Workerd's native R2 metadata is normalized before JSON validation.
+
+`socket.send_now(text).await` opts into immediate delivery during the event.
+It cannot be rolled back if later work fails. Existing `socket.send` remains
+buffered until the state commit. The `StreamProbe` sample reads R2 lines over
+`/ws/StreamProbe/<id>`: send an object key and receive `line` JSON events followed
+by `done`. Its HTTP `read_object` method returns byte arrays, including non-UTF-8
+bytes. No stream write or R2 put API is added.
 
 ## Endpoints
 
@@ -245,13 +358,15 @@ npm run test:e2e
 * The workerd end-to-end test starts Wrangler on a random loopback port with
   temporary storage. It exercises concurrent counter increments, two-client
   broadcasts, room isolation, Unicode, invalid RPC/upgrade/body/binary input,
+  KV/D1 access through the reused bridge, R2 stream reads and WebSocket line
+  delivery, binding persistence after restart,
   Future.await from ChatRoom to a separate Counter Durable Object, departure
   broadcasts, and both objects' persistence after stopping and restarting.
   It cleans up the server and temporary state.
 
 ## PoC boundaries
 
-The sample is unauthenticated. HTTP is a JS adapter with two named sample
+The sample is unauthenticated. HTTP is a JS adapter with four named sample
 classes, not a general Rack implementation or arbitrary remote Ruby execution.
 Messages are text-only, limited to 4096 UTF-8 bytes; RPC bodies are limited to
 8192 bytes. Chat history retains 50 entries.

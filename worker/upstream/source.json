@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/udzura/picoruby-cloudflare-worker-wasm",
+  "revision": "63e2611d9c56d046ebcfd5b83837cdecaed060ba",
+  "files": {
+    "runtime.js": {
+      "source": "templates/runtime/runtime.js",
+      "sha256": "c705a3a8b7f1230b74c5201d5742839611dc3343db824b4a6c136e833cc926c7"
+    },
+    "host-bridge.js": {
+      "source": "templates/runtime/host-bridge.js",
+      "sha256": "fe03767a2b0d348720440044c886083a87c79912b82b3ccb5db738367668c822"
+    },
+    "LICENSE": {
+      "source": "LICENSE",
+      "sha256": "7b4b47cb73f931cd2af984a4556c4737a9a9760786f2eb046790f36543abc671"
+    }
+  }
+}

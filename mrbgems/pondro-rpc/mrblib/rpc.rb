@@ -1,26 +1,4 @@
 module Pondro
-  class RemoteError < StandardError; end
-
-  class Future
-    def initialize(request)
-      @token = Pondro.__rpc_start(JSON.generate(request))
-      @settled = false
-    end
-
-    def await
-      unless @settled
-        result = JSON.parse(Pondro.__rpc_await(@token))
-        @value = result['value']
-        @error = result['ok'] ? nil : RemoteError.new(result['error'])
-        @settled = true
-      end
-      raise @error if @error
-      @value
-    end
-
-    alias read await
-  end
-
   class Reference
     def initialize(name, klass, id)
       @name = name

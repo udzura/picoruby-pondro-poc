@@ -107,12 +107,16 @@ coreに置き、イベントadapterを必要に応じて追加する設計が提
 | --- | --- |
 | `mrbgems/pondro-core` | `Pondro::Object`、identity、state DSL、RPCの公開メソッド一覧、クラス登録、汎用イベントdispatch |
 | `mrbgems/pondro-websocket` | 明示的に有効化するRubyのコールバックと、接続IDによるproxy |
-| `mrbgems/pondro-rpc` | リモートオブジェクトへの参照と、await可能なFuture |
-| `mrbgems/pondro-wasm` | C ABI、JSPIによるRPCのimport、PicoRuby用のイベント駆動task HAL |
+| `mrbgems/pondro-async` | RPCとbinding操作で共通の、イベント内のeager Future |
+| `mrbgems/pondro-rpc` | リモートオブジェクトへの参照 |
+| `mrbgems/pondro-bindings` | Futureを返すKV・D1・R2・AIのproxyと読み出し専用Stream |
+| `mrbgems/pondro-wasm` | C ABI、JSPIによる共通asyncのimport、PicoRuby用のイベント駆動task HAL |
 | `mrbgems/pondro-example` | 通常のCounterと、WebSocket付きChatRoom |
 | `worker/runtime.js` | Wasmのインスタンス生成、UTF-8 JSONとメモリの受け渡し |
 | `worker/host.js` | stateの復元と保存、adapterのeffectsの適用 |
 | `worker/adapters/websocket.js` | CloudflareのWebSocket upgrade、hibernation用attachment、Socketへの送信 |
+| `worker/adapters/bindings.js` | PondroのFutureと既存のCloudflare host dispatcherを接続 |
+| `worker/upstream/` | 無改変・コミット固定のWorker host codecとdispatcher、MITライセンス |
 | `worker/index.js` | HTTPルーティングとDurable Objectのライフサイクルhook |
 | `public/` | 素のJSで実装したデモ用フロントエンド |
 
@@ -120,7 +124,8 @@ coreに置き、イベントadapterを必要に応じて追加する設計が提
 `pondro-core`はWebSocketに依存しません。coreだけを使うアプリケーションでは、
 `pondro-websocket`を外し、`pondro-example`を自分のアプリケーションのmgemに
 置き換えられます。リモート参照が不要なら`pondro-rpc`も外せます。このデモでは、
-core、WebSocket、RPCの三つをリンクしています。
+core、WebSocket、RPC、binding、および共通のasync基盤をリンクしています。
+`pondro-bindings`も省略可能で、RPCとbindingはともに`pondro-async`を利用します。
 JS側のupgrade adapterはRuby側にcapabilitiesを問い合わせるため、WebSocket接続を
 受け付けるかどうかはRubyの`use`宣言で決まります。
 
@@ -174,7 +179,7 @@ JavaScriptの実行はブロックしません。`pending.read`は`await`の別�
 `Pondro::RemoteError`を再度raiseします。RPCをもう一度発行することはありません。
 Futureはイベント内だけで使うもので、永続taskではありません。`state`に保存しないでください。
 
-Cのbridgeは、同期的な`pondro.rpc_start`と、実行を中断できる`pondro.rpc_await`を
+Cのbridgeは、同期的な`pondro.async_start`と、実行を中断できる`pondro.async_await`を
 importします。JSはDurable Objectのstubに対して`invoke` RPCを開始し、Promiseを
 tokenに対応付けて保持します。awaitのimportを`WebAssembly.Suspending`で包み、
 dispatchのexportを`WebAssembly.promising`で包むことで、Promiseが完了するまで
@@ -201,7 +206,7 @@ chainの長さは最大16オブジェクトに制限しています。リモー�
 これにより、別々に開始した呼び出しがbusyなオブジェクト間で互いを待つ場合も、
 待機時間を制限します。timeoutはリモート操作をキャンセルしません。操作が後から完了し、
 リモートのstateを変更する可能性があります。
-デモのJS resolverはCounterとChatRoomに対応しています。Rubyクラスを追加する場合は、
+デモのJS resolverはCounter、ChatRoom、BindingProbeに対応しています。Rubyクラスを追加する場合は、
 JS側のルーティングとresolverにも追加する必要があります。
 
 JS adapterはCloudflareのhibernation API（`acceptWebSocket`、`getWebSockets`、
@@ -211,6 +216,114 @@ JS adapterはCloudflareのhibernation API（`acceptWebSocket`、`getWebSockets`�
 公式の[WebSocket hibernationのドキュメント](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)と
 [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)を
 参照してください。
+
+## その他のCloudflare binding
+
+[picoruby-cloudflare-worker-wasm](https://github.com/udzura/picoruby-cloudflare-worker-wasm)の
+host-call codecとdispatcherを再利用しています。`worker/upstream/source.json`に
+コミット`63e2611d9c56d046ebcfd5b83837cdecaed060ba`とSHA-256を固定し、JSソースを
+無改変で、MITライセンスとともに取り込んでいます。`npm run sync:bridge`で固定した
+ソースを取得・検証できます。Emscriptenが生成するJS、Rackのライフサイクル、
+upstreamのCランタイムは組み込んでいません。
+
+```ruby
+class MyObject < Pondro::Object
+  use Pondro::Bindings
+
+  def load_profile(user_id)
+    cached = bindings[:CACHE].get(user_id)
+    stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?')
+                         .bind(user_id).first('body')
+    { 'kv' => cached.await, 'd1' => stored.await }
+  rescue Pondro::BindingError => error
+    { 'error' => error.message }
+  end
+end
+```
+
+KVの`get`と`put(key, text, ttl: nil)`はeager Futureを返します。存在しない値は`nil`、
+空文字は`''`、書き込み結果は`nil`です。今回のadapterはUTF-8文字列に対応し、
+不正なUTF-8は置き換えずエラーにします。D1は明示的な`prepare`と、元のstatementを
+変更しない`bind`を使い、`run`、`first`（column指定可能）、`raw(column_names: false)`が
+Futureを返します。引数、TTL、scalar parameter、binding型、エラーの検証は共通dispatcherが
+担当し、bindingの失敗はawait時にキャッシュした`Pondro::BindingError`をraiseします。
+
+`worker/index.js`から明示的な型一覧（`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`）をadapterへ渡し、
+Rubyにはproxy用のmetadataとして渡します。接続層はKVのget/put、D1の実行、R2のget、AIのrunとstreamの読み出し操作を許可します。
+R2への書き込み、stream出力、任意のhost操作は公開しません。
+`wrangler.jsonc`のKV・D1のIDはローカルデモ用の仮の値なので、デプロイする場合は
+実際のresource IDに変更してください。setupやテストはCloudflare上のresourceを作成しません。
+
+`BindingProbe`サンプルはD1のtableを作成し、D1とKVの両方へnoteを保存します。
+
+```sh
+curl -X POST http://localhost:8787/api/BindingProbe/note \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"store_note","args":["hello bindings"]}'
+# {"value":{"kv":"hello bindings","d1":"hello bindings"}}
+```
+
+その後`read_note`で両方を読み出せます。table作成のため、最初に`store_note`を呼んでください。
+外部bindingへの操作はDOのsnapshotと一緒に巻き戻らず、KVとD1の書き込みもatomicでは
+ありません。ローカルKVでは書き込み直後の読み出しが通りますが、本番のKVでは
+整合性の特性により以前の値が返る場合があります。
+upstreamとの共通mgem抽出は今後の対象です。現段階では再現可能なJSのsnapshotとして
+依存を取り込み、読み出しstreamは現在のイベントが所有します。
+
+## R2・AIのstream読み出し
+
+登録済みのbindingはドットでも参照できます。`bindings.AI`と`bindings[:AI]`は同じproxyを
+返します。既存のRubyメソッド名と衝突するbinding名は`[]`で参照してください。
+
+```ruby
+object = bindings[:BUCKET].get('sample').await
+stream = object.body # bodyがない場合はnil。存在しないobjectのgetもnil
+
+while (line = stream.readline.await)
+  socket.send_now(line).await
+end
+
+ai_stream = bindings.AI.generate(model, { 'prompt' => 'hello' }, stream: true).await
+chunk = ai_stream.read_partial(1024).await
+rest = ai_stream.read_all(max_bytes: 65_536).await
+ai_stream.close.await
+```
+
+R2の結果は`metadata`と読み出し用の`body`を持ちます。AIの`run`はmodelに依存しないAPIで、
+`generate(..., stream: true)`はstreamを要求し、デフォルトではJSONを返します。
+サンプルの型一覧にはAIがありますが、`wrangler.jsonc`ではAI resourceを設定していません。
+実際のmodelを利用する場合は対応するbindingを設定してください。
+テストではAI bindingのmockを使い、課金される推論やremoteの推論は呼び出しません。
+
+| 読み出し操作 | 結果 |
+| --- | --- |
+| `read_partial(n).await` | 最大nバイトの届いた分を返す。nが埋まるまで待たず、EOFではnil |
+| `readline(max_bytes: 1_048_576).await` | 改行を含む。CRLF・空行・最後の改行なしの行を保持し、EOFではnil |
+| `read_all(max_bytes: 1_048_576).await` | 残り全体。EOFでは空文字。上限を超えたらエラーにしてキャンセル |
+| `close.await` | sourceをキャンセルして解放。繰り返し可能 |
+
+読み出し上限はすべて最大1 MiBで、`read_partial`には正の整数が必要です。
+同じstreamの読み出しは直列化し、読み残しを共有します。行とchunkはバイナリのRuby文字列です。
+既存のJSON/Future ABIではバイト配列として渡し、`mruby-pack`で文字列を復元するため、
+UTF-8の途中で分割されてもdecodeや置き換えは行いません。
+textとして送る際は完全なUTF-8を組み立ててください。AIのstreamは通常SSEなどの生の出力で、
+生成tokenのparserは含みません。
+
+未読streamは、失敗したイベントやawaitしなかったopenも含め、イベント終了時にキャンセルします。
+openの完了後、awaitしていないreadを先にキャンセルしてからFutureの終了を待つため、
+データ待ちのreadがイベントの後片付けを止めることはありません。
+handleは次のイベントへ持ち越せず、stateへ保存できません。
+sourceのエラーは`Pondro::BindingError`として伝わります。
+無改変のupstream dispatcherがR2・AIを検証してdescriptorを生成し、呼び出し単位のwrapperが
+実際のsourceを取得して、Pondroのイベント単位のread registryへ接続します。
+workerdのネイティブなR2 metadataは、JSONの検証前に正規化します。
+
+`socket.send_now(text).await`はイベント中の即時送信を明示的に選ぶAPIです。
+後続の処理が失敗しても送信は巻き戻りません。従来の`socket.send`はstateのcommit後に送ります。
+`StreamProbe`サンプルは`/ws/StreamProbe/<id>`でR2のobject keyを受け取り、
+`line`のJSONイベントを順次送り、最後に`done`を送ります。
+HTTPの`read_object`は、不正なUTF-8も扱えるバイト配列を返します。
+streamの書き込みやR2 putのAPIは追加していません。
 
 ## エンドポイント
 
@@ -253,13 +366,14 @@ npm run test:e2e
   検証します。
 * workerdのE2Eテストでは、一時storageとランダムなloopback portでWranglerを起動します。
   Counterへの並行increment、2クライアントへのbroadcast、roomの分離、Unicode、不正な
-  RPC・upgrade・body・バイナリ入力、ChatRoomから別のCounter DOへのFuture.await、
+  RPC・upgrade・body・バイナリ入力、既存bridge経由のKV・D1操作、R2 stream読み出しとWebSocketへの行送信、再起動後の永続化、
+  ChatRoomから別のCounter DOへのFuture.await、
   退出通知のbroadcast、サーバ停止・再起動後の両オブジェクトの永続化を確認します。
   終了時にはサーバと一時データを片付けます。
 
 ## このPoCの範囲と制限
 
-サンプルに認証はありません。HTTP部分は二つのサンプルクラスを扱うJS adapterであり、
+サンプルに認証はありません。HTTP部分は四つのサンプルクラスを扱うJS adapterであり、
 汎用のRack実装や、任意のRubyコードをリモート実行する仕組みではありません。
 メッセージはtextのみで、UTF-8で4096 bytesまでです。RPCのbodyは8192 bytesまでです。
 チャット履歴は50件まで保持します。

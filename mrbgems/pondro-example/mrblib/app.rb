@@ -62,3 +62,78 @@ end
 
 Pondro.register('Counter', Counter)
 Pondro.register('ChatRoom', ChatRoom)
+
+# A small binding integration sample; calls exercise the same Future as DO RPC.
+class BindingProbe < Pondro::Object
+  use Pondro::Bindings
+  rpc :store_note, :read_note, http: true
+
+  def store_note(text)
+    raise ArgumentError, 'Note must be a string of at most 4096 bytes' unless text.is_a?(String) && text.bytesize <= 4096
+    db = bindings[:DB]
+    db.prepare('CREATE TABLE IF NOT EXISTS pondro_notes (id TEXT PRIMARY KEY, body TEXT NOT NULL)').run.await
+    db.prepare('INSERT OR REPLACE INTO pondro_notes (id, body) VALUES (?, ?)').bind(id, text).run.await
+    bindings[:CACHE].put(id, text).await
+    read_note
+  end
+
+  def read_note
+    cached = bindings[:CACHE].get(id)
+    stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?').bind(id).first('body')
+    { 'kv' => cached.await, 'd1' => stored.await }
+  end
+end
+Pondro.register('BindingProbe', BindingProbe)
+
+class StreamProbe < Pondro::Object
+  use Pondro::Bindings
+  use Pondro::WebSocket
+  rpc :read_object, http: true
+  rpc :read_ai, :abandon_read, :abandon_open
+
+  def read_object(key, mode = 'read_all', limit = 1024 * 1024)
+    object = bindings[:BUCKET].get(key).await
+    return nil unless object
+    stream = object.body
+    return nil unless stream
+    consume_stream(stream, mode, limit)
+  end
+
+  def abandon_read(key)
+    bindings[:BUCKET].get(key).await.body.read_partial(1)
+    'abandoned'
+  end
+
+  def abandon_open(key)
+    bindings[:BUCKET].get(key)
+    'abandoned'
+  end
+
+  def read_ai(model, input, mode = 'read_all', limit = 1024 * 1024)
+    stream = bindings.AI.generate(model, input, stream: true).await
+    consume_stream(stream, mode, limit)
+  end
+
+  def consume_stream(stream, mode, limit)
+    value = case mode
+    when 'read_partial' then stream.read_partial(limit).await
+    when 'readline' then stream.readline(max_bytes: limit).await
+    when 'read_all' then stream.read_all(max_bytes: limit).await
+    else raise ArgumentError, 'Unknown read mode'
+    end
+    value.nil? ? nil : value.bytes
+  end
+
+  def on_connect(socket)
+    socket.send(JSON.generate({ 'type' => 'ready' }))
+  end
+
+  def on_message(socket, key)
+    stream = bindings[:BUCKET].get(key).await.body
+    while (line = stream.readline.await)
+      socket.send_now(JSON.generate({ 'type' => 'line', 'text' => line })).await
+    end
+    socket.send(JSON.generate({ 'type' => 'done' }))
+  end
+end
+Pondro.register('StreamProbe', StreamProbe)
