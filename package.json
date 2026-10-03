@@ -1,0 +1,17 @@
+{
+  "name": "picoruby-pondro-poc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "ruby scripts/setup.rb",
+    "build": "ruby scripts/build.rb",
+    "dev": "wrangler dev",
+    "test": "node --test test/*.test.js",
+    "test:ruby": "ruby test/core_test.rb && ruby test/future_test.rb",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0",
+    "ws": "8.22.0"
+  }
+}

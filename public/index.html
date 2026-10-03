@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PONDRO playground</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">PicoRuby · Durable Objects</p>
+    <h1>PONDRO playground</h1>
+    <p>Ruby objects with durable state. Add WebSocket events when you need them.</p>
+    <section>
+      <h2>Plain PONDRO</h2>
+      <pre>class Counter &lt; Pondro::Object
+  state :count, default: 0
+  rpc :increment, :value, http: true
+end</pre>
+      <label>Counter ID <input id="counter-id" value="demo" maxlength="128"></label>
+      <div class="actions"><button id="read">Read</button><button id="increment">Increment</button><output id="count">—</output></div>
+      <p id="counter-status" role="status"></p>
+    </section>
+    <section>
+      <h2>PONDRO + WebSocket</h2>
+      <pre>class ChatRoom &lt; Pondro::Object
+  use Pondro::WebSocket
+  def on_message(socket, message)
+    pending = Counter[counter_id].increment
+    count = pending.await
+  end
+end</pre>
+      <div class="chat-identities">
+        <label>Room ID <input id="room-id" value="lobby" maxlength="128"></label>
+        <label>Counter ID <input id="chat-counter-id" value="lobby" maxlength="128"></label>
+      </div>
+      <div class="actions"><button id="connect">Connect</button><button id="disconnect" disabled>Disconnect</button><span id="socket-status" role="status">Disconnected</span></div>
+      <p>Open a second tab in the same room to see broadcasts. History survives reconnects and server restarts.</p>
+      <ol id="messages" aria-live="polite"></ol>
+      <form id="message-form"><label>Message <input id="message" maxlength="4096" required></label><button id="send" disabled>Send</button></form>
+      <div class="chat-total" aria-live="polite">Total messages <output id="total-messages">—</output></div>
+    </section>
+  </main>
+</body>
+</html>

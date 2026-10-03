@@ -1,0 +1,23 @@
+:root { font-family: system-ui, sans-serif; color: #16342c; background: #eef4ee; }
+body { margin: 0; }
+main { max-width: 780px; margin: 50px auto; padding: 0 24px; }
+h1 { font-size: 42px; letter-spacing: -2px; margin: 10px 0; }
+.eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 12px; }
+section { background: white; border: 1px solid #cddbd1; border-radius: 16px; padding: 24px; margin: 24px 0; }
+h2 { margin-top: 0; }
+pre { background: #f1f5f2; border-radius: 8px; padding: 16px; overflow: auto; }
+input { font: inherit; border: 1px solid #b5c7bb; padding: 9px; border-radius: 6px; max-width: 100%; box-sizing: border-box; }
+label { display: flex; gap: 12px; align-items: center; }
+button { font: inherit; background: #216546; color: white; border: 0; padding: 10px 16px; border-radius: 6px; cursor: pointer; }
+button:disabled { opacity: .4; cursor: default; }
+.actions { display: flex; gap: 12px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
+output { font-size: 28px; }
+#messages { padding-left: 24px; max-height: 320px; overflow: auto; overflow-wrap: anywhere; }
+#messages li { padding: 6px; }
+form { display: flex; flex-wrap: wrap; gap: 12px; }
+form label { flex: 1; } form input { width: 100%; }
+.chat-identities { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.chat-identities label { flex: 1 1 280px; }
+.chat-identities input { flex: 1; min-width: 0; }
+.chat-total { display: flex; justify-content: flex-end; align-items: baseline; gap: 12px; margin-top: 18px; color: #416052; }
+.chat-total output { font-variant-numeric: tabular-nums; color: #16342c; }
