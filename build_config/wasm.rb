@@ -14,7 +14,7 @@ MRuby::CrossBuild.new('pondro-wasm') do |conf|
     conf.gem gemdir: "#{gems}/#{name}"
   end
   conf.gem core: 'picoruby-json'
-  %w[pondro-core pondro-async pondro-rpc pondro-bindings pondro-websocket pondro-example pondro-wasm].each do |name|
+  %w[pondro-core pondro-async pondro-rpc pondro-bindings pondro-websocket pondro-example pondro-example2 pondro-wasm].each do |name|
     conf.gem gemdir: "#{root}/mrbgems/#{name}"
   end
 end

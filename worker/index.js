@@ -4,12 +4,14 @@ import { RubyRuntime } from './runtime.js';
 import { PondroHost } from './host.js';
 import { WebSocketAdapter } from './adapters/websocket.js';
 import { BindingAdapter } from './adapters/bindings.js';
+import { createMockAI } from '../example2/mock-ai.js';
 
 const MAX_BODY_BYTES = 8192;
+const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AIParticipant', 'AIChatRoom'];
 
 function route(url) {
-  const match = url.pathname.match(/^\/(api|ws)\/(Counter|ChatRoom|BindingProbe|StreamProbe|GenericProbe)\/([^/]+)$/);
-  if (!match) return null;
+  const match = url.pathname.match(/^\/(api|ws)\/([^/]+)\/([^/]+)$/);
+  if (!match || !CLASSES.includes(match[2])) return null;
   const id = decodeURIComponent(match[3]);
   if (!id || id.length > 128) throw new Error('Invalid object ID');
   return { transport: match[1], class: match[2], id };
@@ -43,9 +45,12 @@ async function readPayload(request) {
 export class PondroObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    const bindings = new BindingAdapter(env, { CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai' });
-    this.host = new PondroHost(ctx, new RubyRuntime(module), [bindings], async (request, chain) => {
-      if (!['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe'].includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
+    const mock = env.EXAMPLE2_AI_MODE === 'mock';
+    const bindingEnv = mock ? { ...env, AI: createMockAI() } : env;
+    const bindings = new BindingAdapter(bindingEnv, { CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai' });
+    const example2 = { context: () => ({ ai_mode: mock ? 'mock' : 'live' }), handles: () => false };
+    this.host = new PondroHost(ctx, new RubyRuntime(module), [bindings, example2], async (request, chain) => {
+      if (!CLASSES.includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
         throw new Error('Invalid remote PONDRO identity');
       }
       const id = env.PONDRO.idFromName(JSON.stringify([request.class, request.id]));

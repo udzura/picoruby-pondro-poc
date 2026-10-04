@@ -1,0 +1,107 @@
+# Example 2: shared AI chat
+
+[日本語](README.ja.md)
+
+Humans and AIs share a WebSocket chat. One AI ID has one saved personality and
+can join multiple rooms; each room has independent history. The vanilla JS UI
+is at `/example2/`.
+
+## Run
+
+From the repository root, after `npm ci` and `npm run setup`:
+
+```sh
+npm run build
+npm run dev:example2:mock
+```
+
+Open <http://localhost:8787/example2/>. Mock AI echoes the personality and latest
+message, using local DOs and no remote inference. The UI labels this mode clearly.
+
+1. Enter a Room ID and your name, then connect.
+2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.
+3. Click **Invite AI to this room**, then send a message.
+4. Open another tab in the same room to join as another human.
+5. Join a different room, load the same AI ID, and invite it there too.
+
+The first configuration of an AI ID wins. Existing IDs restore the saved name
+and prompt; use a new ID for a different personality. A room supports up to four
+AIs, each responding once per human message, in invitation order.
+Use **Remove** on an AI's participant chip to remove it from the current room.
+Its personality, other rooms and existing messages remain available, and it can
+be invited again. Removal is disabled while an AI response is in progress.
+
+For real inference, authenticate Wrangler with Cloudflare and run:
+
+```sh
+npm run dev:example2
+```
+
+`wrangler.jsonc` in this directory configures a remote AI binding. Inference uses
+Workers AI even though the Worker and DOs run locally, and counts toward usage.
+The model is `@cf/meta/llama-3.1-8b-instruct-fp8` with streaming and `max_tokens: 512`.
+See [binding configuration](https://developers.cloudflare.com/workers-ai/configuration/bindings/)
+and [model documentation](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/).
+Automated tests never run real inference.
+
+## Design
+
+| Object | Responsibility |
+| --- | --- |
+| `AIParticipant[ai_id]` | Durable name, initial personality, joined Room IDs |
+| `AIChatRoom[room_id]` | Durable AI roster, history, WebSocket broadcasts |
+
+Both use the existing PONDRO namespace with distinct `[class, id]` identities.
+The optional `mrbgems/pondro-example2` mgem contains the app and an SSE parser;
+Pondro core APIs are unchanged. The Room reads an AI profile through internal
+RPC, then performs inference with its own history. Keeping inference in the
+Room avoids holding the shared AI's event queue throughout generation, allowing
+different rooms to respond concurrently without mixing conversations.
+
+```ruby
+profile = AIParticipant[ai_id].profile.await
+stream = bindings.AI.stream!(:generate, profile['model'], input)
+Pondro::Example2::SSE.each_delta(stream) do |delta|
+  # Broadcast using socket.send_now(...).await.
+end
+stream.close
+```
+
+The last 20 entries provide model context, and the last 50 complete messages
+are saved. Only the current AI's previous replies use the assistant role;
+other participants' names appear in user content. SSE supports Workers AI
+`response` and OpenAI-style `choices[0].delta.content`, CRLF, multiline data,
+split UTF-8, and `[DONE]`. Deltas reach all human sockets before completion.
+AI failures preserve the human message, mark the live reply interrupted, release
+the stream, and permit the next turn. One disconnected client does not stop others.
+
+## Protocol and limits
+
+Connect to `/ws/AIChatRoom/<room_id>?name=<display_name>` and send
+`{"type":"invite","ai_id":"sage"}`, `{"type":"remove","ai_id":"sage"}`
+or `{"type":"say","text":"Hello!"}`.
+Events: `welcome`, `participants`, `message`, `ai_start`, `ai_delta`, `ai_error`,
+`ready`, `notice`, `error`. A message's `sequence` is unique within its room.
+POST `/api/AIParticipant/<ai_id>` accepts
+`{"method":"configure","args":["Sage","Be a curious botanist."]}` and
+`{"method":"profile"}`. The `join`, `leave` and Room `history` RPCs are internal only.
+
+This is an unauthenticated local PoC. Limits: 4096-byte personality,
+2000-byte human message, 16 KiB AI reply, 256 KiB SSE input per reply,
+100 rooms per AI. Turns within a room are serialized. Futures/streams are
+event-local. History commits at event completion, so live deltas are best effort
+and can precede storage. AI membership and Room state are not a distributed
+transaction.
+
+## Verify
+
+```sh
+npm test
+npm run test:ruby
+npm run test:e2e
+npm run test:example2:e2e
+```
+
+Real-Wasm tests cover concurrent rooms sharing one AI, immutable personality,
+room isolation, streaming, error recovery and storage restoration. The workerd
+test uses mock AI for real WebSockets, invitations, UTF-8, departure and restart.

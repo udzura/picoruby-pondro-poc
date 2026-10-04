@@ -6,9 +6,12 @@
     "setup": "ruby scripts/setup.rb",
     "build": "ruby scripts/build.rb",
     "dev": "wrangler dev",
+    "dev:example2": "wrangler dev --config example2/wrangler.jsonc",
+    "dev:example2:mock": "wrangler dev --config example2/wrangler.mock.jsonc",
     "test": "node --test test/*.test.js",
     "test:ruby": "ruby test/core_test.rb && ruby test/future_test.rb",
     "test:e2e": "node test/e2e.mjs",
+    "test:example2:e2e": "node test/example2-e2e.mjs",
     "sync:bridge": "ruby scripts/sync_bridge.rb"
   },
   "devDependencies": {

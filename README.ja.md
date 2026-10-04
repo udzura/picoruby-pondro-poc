@@ -8,6 +8,10 @@ Durable Objectに対応付ける仕組みです。このリポジトリでは、
 イベントを扱う`ChatRoom`を動かします。
 picoruby-cloudflare-worker-wasmや、ほかのWorkerフレームワークには依存しません。
 
+[Example 2](example2/README.ja.md)には、性格を共有するAIと人間のWebSocketチャットを追加しました。
+`npm run dev:example2:mock`でローカル確認、`npm run dev:example2`でWorkers AIを利用し、
+`/example2/`を開いてください。
+
 ## ローカルで動かす
 
 必要なものは、`rake`を利用できるRuby、WebAssembly JSPIに対応したNode.js
@@ -112,6 +116,7 @@ coreに置き、イベントadapterを必要に応じて追加する設計が提
 | `mrbgems/pondro-bindings` | 同期binding proxy、明示的な非同期呼び出しと読み出し専用StreamFuture |
 | `mrbgems/pondro-wasm` | C ABI、JSPIによる共通asyncのimport、PicoRuby用のイベント駆動task HAL |
 | `mrbgems/pondro-example` | 通常のCounterと、WebSocket付きChatRoom |
+| `mrbgems/pondro-example2` | 性格を共有するAIと、streamを配信するWebSocketチャット |
 | `worker/runtime.js` | Wasmのインスタンス生成、UTF-8 JSONとメモリの受け渡し |
 | `worker/host.js` | stateの復元と保存、adapterのeffectsの適用 |
 | `worker/adapters/websocket.js` | CloudflareのWebSocket upgrade、hibernation用attachment、Socketへの送信 |
@@ -122,7 +127,7 @@ coreに置き、イベントadapterを必要に応じて追加する設計が提
 
 ビルド設定では、ローカルの各ディレクトリをmgemとして読み込みます。
 `pondro-core`はWebSocketに依存しません。coreだけを使うアプリケーションでは、
-`pondro-websocket`を外し、`pondro-example`を自分のアプリケーションのmgemに
+`pondro-websocket`を外し、`pondro-example`と`pondro-example2`を自分のアプリケーションのmgemに
 置き換えられます。リモート参照が不要なら`pondro-rpc`も外せます。このデモでは、
 core、WebSocket、RPC、binding、および共通のasync基盤をリンクしています。
 `pondro-bindings`も省略可能で、RPCとbindingはともに`pondro-async`を利用します。
@@ -206,7 +211,7 @@ chainの長さは最大16オブジェクトに制限しています。リモー�
 これにより、別々に開始した呼び出しがbusyなオブジェクト間で互いを待つ場合も、
 待機時間を制限します。timeoutはリモート操作をキャンセルしません。操作が後から完了し、
 リモートのstateを変更する可能性があります。
-デモのJS resolverはCounter、ChatRoom、BindingProbe、StreamProbe、GenericProbeに対応しています。Rubyクラスを追加する場合は、
+デモのJS resolverはCounter、ChatRoom、BindingProbe、StreamProbe、GenericProbe、AIParticipant、AIChatRoomに対応しています。Rubyクラスを追加する場合は、
 JS側のルーティングとresolverにも追加する必要があります。
 
 JS adapterはCloudflareのhibernation API（`acceptWebSocket`、`getWebSockets`、

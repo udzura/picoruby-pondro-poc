@@ -7,6 +7,10 @@ Durable Object. This repository runs real PicoRuby bytecode in Wasm, with a
 plain durable `Counter` and a `ChatRoom` that opts into WebSocket events.
 It does not depend on picoruby-cloudflare-worker-wasm or another Worker framework.
 
+[Example 2](example2/README.md) adds shared AI personalities and WebSocket chat.
+Use `npm run dev:example2:mock` for an offline demo or `npm run dev:example2`
+for Workers AI, then open `/example2/`.
+
 ## Run locally
 
 Requirements: Ruby with `rake`, Node.js with WebAssembly JSPI support
@@ -109,6 +113,7 @@ that boundary on both sides of Wasm:
 | `mrbgems/pondro-bindings` | Synchronous binding proxies, explicit async calls and read-only StreamFutures |
 | `mrbgems/pondro-wasm` | C ABI, JSPI async imports and an event-driven task HAL for PicoRuby |
 | `mrbgems/pondro-example` | Plain Counter and WebSocket ChatRoom |
+| `mrbgems/pondro-example2` | Shared AI personalities and streaming WebSocket chat rooms |
 | `worker/runtime.js` | Wasm instantiation and UTF-8 JSON/memory handling |
 | `worker/host.js` | State restore/commit and generic adapter effects |
 | `worker/adapters/websocket.js` | Cloudflare upgrade, hibernation attachments and socket delivery |
@@ -119,7 +124,7 @@ that boundary on both sides of Wasm:
 
 The build config loads the local directories as mgems. `pondro-core` has no
 WebSocket dependency. A core-only application can omit `pondro-websocket` and
-replace `pondro-example` with its own application mgem. Remote references can
+replace `pondro-example` and `pondro-example2` with its own application mgem. Remote references can
 also be omitted by leaving out `pondro-rpc`. Binding access is optional through
 `pondro-bindings`; both use `pondro-async`. This demo links all of them.
 The JS upgrade adapter queries Ruby capabilities, so Ruby's `use` declaration
@@ -198,7 +203,7 @@ or exactly-once guarantees. Call chains reject self-calls and cycles within
 the propagated chain and are limited to 16 objects. Remote calls have a
 10-second timeout, also bounding independently initiated wait cycles between
 busy objects. Timeout does not cancel a remote operation: it may still complete
-and change remote state. The demo's JS resolver supports Counter, ChatRoom, BindingProbe, StreamProbe and GenericProbe;
+and change remote state. The demo's JS resolver supports Counter, ChatRoom, BindingProbe, StreamProbe, GenericProbe, AIParticipant and AIChatRoom;
 adding another Ruby class also requires adding it to the JS routing/resolver.
 
 The JS adapter uses Cloudflare's hibernation API (`acceptWebSocket`,

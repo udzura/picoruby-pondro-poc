@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pondro · AI chat</title>
+  <link rel="stylesheet" href="/example2/style.css">
+  <script type="module" src="/example2/app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div><a class="back" href="/">← Playground</a><p class="eyebrow">Pondro / Example 02</p><h1>A room for everyone.</h1><p class="intro">Humans and AI, in the same conversation. Bring one personality to many rooms.</p></div>
+      <span class="mode" id="mode">AI chat</span>
+    </header>
+    <div class="workspace">
+      <aside>
+        <section class="card">
+          <p class="step">01 / Join a room</p>
+          <form id="connect-form">
+            <label>Room ID<input id="room-id" value="lounge" maxlength="128" required></label>
+            <label>Your name<input id="human-name" value="Guest" maxlength="40" required></label>
+            <div class="actions"><button id="connect">Connect</button><button type="button" class="secondary" id="disconnect" disabled>Leave</button></div>
+          </form>
+          <p class="hint">Open another tab with the same Room ID to chat together.</p>
+        </section>
+        <section class="card">
+          <p class="step">02 / Give AI a personality</p>
+          <form id="ai-form">
+            <label>AI ID<input id="ai-id" value="sage" maxlength="128" required></label>
+            <label>AI name<input id="ai-name" value="Sage" maxlength="40" required></label>
+            <label>Personality prompt<textarea id="personality" rows="5" maxlength="4096" required>You are a thoughtful, friendly companion. Give concise answers, ask curious questions, and reply in the language used by the people in the room.</textarea></label>
+            <button id="create-ai">Load or create AI</button>
+          </form>
+          <p id="ai-info" class="hint" role="status">The first prompt is saved for this AI ID. Use a new ID for another personality.</p>
+          <button id="invite" class="secondary wide" disabled>Invite AI to this room</button>
+        </section>
+      </aside>
+      <section class="chat card" aria-label="Chat room">
+        <div class="chat-heading"><div><p class="step">The conversation</p><h2 id="room-title">Choose your room</h2></div><span id="connection" class="connection" role="status">Disconnected</span></div>
+        <div id="participants" class="participants" aria-label="AI participants"><span class="hint">Invite an AI, or start a conversation with other people.</span></div>
+        <div class="timeline" id="timeline" role="log" aria-live="polite" aria-relevant="additions text">
+          <div id="empty" class="empty"><span class="empty-icon">✳</span><h3>Say hello.</h3><p>Connect to a room, create an AI, and invite it to join you.</p></div>
+        </div>
+        <p id="chat-status" class="chat-status" role="status"></p>
+        <form id="message-form" class="composer">
+          <label class="sr-only" for="message">Message</label>
+          <textarea id="message" rows="2" maxlength="2000" placeholder="Write to everyone in the room…" required disabled></textarea>
+          <button id="send" disabled>Send ↗</button>
+        </form>
+        <p class="footer-note">AI replies stream into the chat. The last 50 messages survive reconnects.</p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
