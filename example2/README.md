@@ -230,3 +230,19 @@ catches the error; external side effects cannot be rolled back.
 See [the agent API](../mrbgems/pondro-agent/README.md) for response helpers,
 including the optional SSE helper and custom stream protocols. Real-model
 function calling has not been verified by the automated mock tests.
+
+
+Agent bots also have `japan_weather(location, prefecture?, days?)`. Ask, for example,
+“福岡市の明日までの天気を教えて”. The tool uses `bindings.fetch` to combine
+[Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) (Japan only)
+and the [JMA forecast API](https://open-meteo.com/en/docs/jma-api). It returns daily
+WMO weather codes, high/low temperatures (°C), and precipitation totals (mm),
+for 1–7 days from today in Asia/Tokyo (default: 3). Existing agent IDs gain this
+tool automatically; ordinary Chat bots do not use tools.
+
+Prefer romanized city names and a Japanese prefecture, e.g. `location: "Fukuoka",
+prefecture: "福岡県"`. Multiple matches require clarification; missing matches
+require a more precise name. Replies identify the resolved location and cite
+Open-Meteo JMA (geocoding: GeoNames). API failures appear as AI errors.
+The offline mock AI only selects remember/recall; weather requires a live,
+tool-capable model and network access to Open-Meteo.

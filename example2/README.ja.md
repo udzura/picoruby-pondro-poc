@@ -214,3 +214,19 @@ toolを呼んで結果を受け取ります。推論通信はありません。�
 
 SSEや独自stream形式のヘルパーについては[agent API](../mrbgems/pondro-agent/README.md)を
 参照してください。実モデルのtool callはmockの自動テストでは未検証です。
+
+
+agent型botは`japan_weather(location, prefecture?, days?)`も利用できます。
+「福岡市の明日までの天気を教えて」などと質問してください。
+`bindings.fetch`で[地名検索API](https://open-meteo.com/en/docs/geocoding-api)を
+日本に限定して検索し、[JMA予報API](https://open-meteo.com/en/docs/jma-api)から
+日別のWMO天気コード、最高・最低気温（°C）、降水量（mm）を取得します。
+日本時間の今日から1〜7日分、既定は3日分です。既存のagent型botにも自動で
+追加されます。通常のChat botではtoolは利用しません。
+
+検索には`location: "Fukuoka", prefecture: "福岡県"`のようにローマ字の都市名と
+日本語の都道府県名を推奨します。同名の候補が複数ある場合は確認を促し、
+見つからない場合は地名の再指定を促します。回答には検索で解決した地域と
+Open-Meteo JMA（地名データ: GeoNames）の出典を含めます。APIの通信失敗は
+AIエラーとして表示します。offline mock AIが選択するtoolはremember/recallのみです。
+天気の利用にはtool対応のliveモデルとOpen-Meteoへの通信が必要です。

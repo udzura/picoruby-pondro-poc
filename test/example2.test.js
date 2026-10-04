@@ -16,7 +16,7 @@ function source(text) {
   } });
 }
 
-function world(ai) {
+function world(ai, fetcher) {
   const snapshots = new Map();
   const hosts = new Map();
   function get(klass, id) {
@@ -26,7 +26,7 @@ function world(ai) {
       const ctx = { getWebSockets: () => sockets, storage: {
         kv: { get: () => snapshots.get(key), put: (_, value) => snapshots.set(key, value) }, transactionSync: fn => fn()
       } };
-      const binding = new BindingAdapter({ AI: ai }, { AI: 'ai' });
+      const binding = new BindingAdapter({ AI: ai }, { AI: 'ai' }, fetcher ? { fetcher } : {});
       const profile = { context: () => ({ object_registry: 'default' }), handles: () => false };
       const runtime = new RubyRuntime(module);
       const host = new PondroHost(ctx, runtime, [binding, profile], (request, chain) =>
@@ -388,5 +388,88 @@ test('agent rejects unknown and invalid tools before execution and can handle th
     response = { response: 'Recovered' };
     await human.dispatch({ type: 'say', text: 'Try again' });
     assert.equal(human.events.findLast(event => event.type === 'message').entry.text, 'Recovered');
+  } finally { w.destroy(); }
+});
+
+
+test('agent weather tool fetches Japanese geocoding and JMA forecasts through real Wasm', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const requests = [];
+  let mode = 'ok';
+  let args = { location: '福岡市 & city', prefecture: '福岡県', days: 2 };
+  let result;
+  const place = { name: '福岡市', admin1: '福岡県', country_code: 'JP', latitude: 33.6, longitude: 130.41667 };
+  const w = world({ async run(model, input) {
+    assert.ok(input.tools.some(tool => tool.name === 'japan_weather'));
+    assert.match(input.messages[0].content, /always call japan_weather/);
+    if (input.messages.at(-1).role === 'tool') {
+      result = JSON.parse(input.messages.at(-1).content);
+      return { response: JSON.stringify(result) };
+    }
+    return { tool_calls: [{ name: 'japan_weather', arguments: args }] };
+  } }, async request => {
+    const url = new URL(request.url);
+    requests.push(url);
+    if (mode === 'http') return new Response('Unavailable', { status: 503 });
+    if (url.hostname === 'geocoding-api.open-meteo.com') {
+      assert.equal(url.searchParams.get('location'), null);
+      assert.equal(url.searchParams.get('countryCode'), 'JP');
+      assert.equal(url.searchParams.get('language'), 'ja');
+      return Response.json(mode === 'missing' ? {} : { results: mode === 'ambiguous' ?
+        [place, { ...place, admin1: '埼玉県' }] : [place, { ...place, country_code: 'US' }] });
+    }
+    assert.equal(url.hostname, 'api.open-meteo.com');
+    assert.equal(url.pathname, '/v1/jma');
+    assert.equal(url.searchParams.get('latitude'), '33.6');
+    assert.equal(url.searchParams.get('timezone'), 'Asia/Tokyo');
+    assert.equal(url.searchParams.get('forecast_days'), '2');
+    assert.equal(url.searchParams.get('daily'), 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum');
+    return Response.json({ daily: mode === 'malformed' ? {} : {
+      time: ['2026-10-04', '2026-10-05'], weather_code: [0, 61],
+      temperature_2m_max: [25.5, 23], temperature_2m_min: [18, null], precipitation_sum: [0, 4.2]
+    } });
+  });
+  try {
+    await w.get('AIParticipant', 'weather').dispatch('http.rpc', {
+      method: 'configure', args: ['Weather', 'Be helpful.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent']
+    });
+    const human = await w.connect('weather-room', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'weather' });
+    const ask = () => human.dispatch({ type: 'say', text: '福岡市の天気を教えて' });
+    await ask();
+    assert.equal(requests[0].searchParams.get('name'), args.location);
+    assert.equal(result.status, 'ok');
+    assert.equal(result.location.prefecture, '福岡県');
+    assert.equal(result.forecast[1].temperature_2m_min, null);
+    assert.equal(result.forecast[1].precipitation_sum, 4.2);
+    assert.equal(result.units.precipitation_sum, 'mm');
+    assert.equal(human.events.some(event => event.type === 'ai_error'), false);
+    mode = 'missing';
+    await ask();
+    assert.equal(result.status, 'not_found');
+    mode = 'ambiguous';
+    args = { location: 'Fukuoka', days: 2 };
+    const before = requests.length;
+    await ask();
+    assert.equal(result.status, 'ambiguous');
+    assert.equal(result.candidates.length, 2);
+    assert.equal(requests.length, before + 1, 'ambiguous locations must not fetch a forecast');
+    for (const failure of ['http', 'malformed']) {
+      mode = failure;
+      await ask();
+      assert.match(human.events.findLast(event => event.type === 'ai_error').text,
+        failure === 'http' ? /HTTP 503/ : /Invalid JMA/);
+    }
+    mode = 'ok';
+    await ask();
+    assert.equal(result.status, 'ok');
+    args = { location: 'Tokyo', days: 8 };
+    const count = requests.length;
+    await ask();
+    assert.match(human.events.findLast(event => event.type === 'ai_error').text, /Invalid tool arguments/);
+    assert.equal(requests.length, count);
+    await assert.rejects(w.get('AIChatRoom', 'weather-room').dispatch('rpc', {
+      method: 'japan_weather', args: [{ location: 'Tokyo' }]
+    }), /not exported/);
   } finally { w.destroy(); }
 });
