@@ -52,6 +52,9 @@ message, using local DOs and no remote inference. The UI labels this mode clearl
 The language selector switches between Japanese and English without reconnecting
 or changing messages or personality prompts. Its preference is saved in the browser;
 the initial language follows the browser language.
+Room ID and your name are also saved to localStorage as you type and restored
+when reopening the page in the same browser. Reconnection stays manual, and
+clearing demo data preserves these input values.
 Share `/example2/` with demo participants: without `admin=1`, AI settings and
 creation/invitation controls are disabled, while joining rooms and chatting work
 normally. This is a UI-only switch, not server-side authorization; the API and

@@ -2,6 +2,7 @@ import { t, localize, applyLanguage, setLanguage } from './i18n.js';
 
 const $ = id => document.getElementById(id);
 const admin = new URLSearchParams(location.search).get('admin') === '1';
+const connectionPreferenceKey = 'pondro-example2-connection';
 const encoder = new TextEncoder();
 const entries = new Map();
 const active = new Set();
@@ -11,6 +12,22 @@ let loadedAI;
 let loadingAI = false;
 let loadingCatalog = false;
 let resetting = false;
+
+function restoreConnectionPreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(connectionPreferenceKey));
+    for (const [key, id] of [['room', 'room-id'], ['name', 'human-name']]) {
+      const input = $(id);
+      if (typeof saved?.[key] === 'string' && saved[key].length <= input.maxLength) input.value = saved[key];
+    }
+  } catch { /* Preferences are optional when storage is unavailable or invalid. */ }
+}
+
+function saveConnectionPreferences() {
+  try {
+    localStorage.setItem(connectionPreferenceKey, JSON.stringify({ room: $('room-id').value, name: $('human-name').value }));
+  } catch { /* Chat remains usable when storage is unavailable. */ }
+}
 
 function connected() { return socket?.readyState === WebSocket.OPEN; }
 function controls() {
@@ -136,6 +153,7 @@ $('connect-form').addEventListener('submit', event => {
   const room = $('room-id').value.trim();
   const name = $('human-name').value.trim();
   if (!room || !name || encoder.encode(name).length > 128) { localize($('chat-status'), 'invalidConnection'); return; }
+  saveConnectionPreferences();
   const url = new URL(`/ws/AIChatRoom/${encodeURIComponent(room)}`, location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('name', name);
@@ -252,7 +270,7 @@ $('confirm-reset').addEventListener('click', async () => {
     const response = await fetch('/api/demo/reset?admin=1', { method: 'POST' });
     if (!response.ok) throw new Error(await response.text());
     entries.clear(); active.clear(); loadedAI = null; self = undefined;
-    $('connect-form').reset(); $('ai-form').reset(); $('message').value = '';
+    $('ai-form').reset(); $('message').value = '';
     $('ai-name').readOnly = false; $('personality').readOnly = false;
     localize($('room-title'), 'chooseRoom'); localize($('mode'), 'mode');
     $('timeline').replaceChildren(); participants([]); plain($('chat-status'));
@@ -279,6 +297,8 @@ if (!admin) {
   $('participants').querySelector('span').dataset.i18n = 'noAIGuest';
 }
 $('language').addEventListener('change', event => setLanguage(event.target.value));
+restoreConnectionPreferences();
+for (const id of ['room-id', 'human-name']) $(id).addEventListener('input', saveConnectionPreferences);
 applyLanguage();
 controls();
 if (admin) refreshCatalog();
