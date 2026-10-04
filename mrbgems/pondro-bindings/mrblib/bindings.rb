@@ -41,14 +41,34 @@ module Pondro
       end
     end
 
+    module AsyncMethods
+      def async!(method, *args, **options, &block)
+        raise ArgumentError, 'Binding calls do not accept blocks' if block
+        name = method.to_s
+        raise ArgumentError, 'Unsupported async method: ' + name unless async_methods.include?(name)
+        __send__('future_' + name, *args, **options)
+      end
+
+      private
+
+      def async_methods
+        []
+      end
+    end
+
     class Binding
+      include AsyncMethods
+
       def initialize(name)
         @name = name
       end
 
       def call(operation, *args, &transform)
-        Future.new({ 'kind' => 'binding', 'operation' => operation,
-                     'binding' => @name, 'args' => args }, BindingError, &transform)
+        Future.new(request(operation, *args), BindingError, &transform)
+      end
+
+      def request(operation, *args)
+        { 'kind' => 'binding', 'operation' => operation, 'binding' => @name, 'args' => args }
       end
     end
 
@@ -67,6 +87,10 @@ module Pondro
 
       # Escape hatch for remote methods that collide with Ruby's own methods.
       def invoke(name, *args, **options, &block)
+        async!(name, *args, **options, &block).await
+      end
+
+      def async!(name, *args, **options, &block)
         raise ArgumentError, 'Binding calls do not accept blocks' if block
         args << options unless options.empty?
         Future.new({ 'kind' => 'binding', 'operation' => 'pondro.call',
@@ -76,10 +100,24 @@ module Pondro
 
     class KV < Binding
       def get(key)
-        call('kv.get', key)
+        future_get(key).await
       end
 
       def put(key, value, ttl: nil)
+        future_put(key, value, ttl: ttl).await
+      end
+
+      private
+
+      def async_methods
+        ['get', 'put']
+      end
+
+      def future_get(key)
+        call('kv.get', key)
+      end
+
+      def future_put(key, value, ttl: nil)
         options = {}
         options['ttl'] = ttl unless ttl.nil?
         call('kv.put', key, value, JSON.generate(options))
@@ -92,6 +130,8 @@ module Pondro
       end
 
       class Statement
+        include AsyncMethods
+
         def initialize(database, sql, params)
           @database = database
           @sql = sql
@@ -103,14 +143,32 @@ module Pondro
         end
 
         def run
-          execute('run', {})
+          future_run.await
         end
 
         def first(column = nil)
-          execute('first', { 'column' => column })
+          future_first(column).await
         end
 
         def raw(column_names: false)
+          future_raw(column_names: column_names).await
+        end
+
+        private
+
+        def async_methods
+          ['run', 'first', 'raw']
+        end
+
+        def future_run
+          execute('run', {})
+        end
+
+        def future_first(column = nil)
+          execute('first', { 'column' => column })
+        end
+
+        def future_raw(column_names: false)
           execute('raw', { 'columnNames' => column_names })
         end
 

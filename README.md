@@ -106,7 +106,7 @@ that boundary on both sides of Wasm:
 | `mrbgems/pondro-websocket` | Opt-in Ruby callbacks and connection-ID proxies |
 | `mrbgems/pondro-async` | Event-local eager Futures, shared by RPC and binding calls |
 | `mrbgems/pondro-rpc` | Remote object references |
-| `mrbgems/pondro-bindings` | KV, D1, R2 and AI proxies, plus read-only Streams |
+| `mrbgems/pondro-bindings` | Synchronous binding proxies, explicit async calls and read-only StreamFutures |
 | `mrbgems/pondro-wasm` | C ABI, JSPI async imports and an event-driven task HAL for PicoRuby |
 | `mrbgems/pondro-example` | Plain Counter and WebSocket ChatRoom |
 | `worker/runtime.js` | Wasm instantiation and UTF-8 JSON/memory handling |
@@ -222,9 +222,9 @@ class MyObject < Pondro::Object
   use Pondro::Bindings
 
   def load_profile(user_id)
-    cached = bindings[:CACHE].get(user_id)
+    cached = bindings[:CACHE].async!(:get, user_id)
     stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?')
-                         .bind(user_id).first('body')
+                         .bind(user_id).async!(:first, 'body')
     { 'kv' => cached.await, 'd1' => stored.await }
   rescue Pondro::BindingError => error
     { 'error' => error.message }
@@ -232,13 +232,25 @@ class MyObject < Pondro::Object
 end
 ```
 
-KV `get` and `put(key, text, ttl: nil)` return eager Futures. Missing values return
+Ordinary binding calls wait for the operation and return its result. Use
+`async!(:method, *args, **options)` to start immediately and return a
+`Pondro::Future`; `await` returns the cached result or raises the cached error.
+Only Ruby/Wasm execution waits: JSPI suspends it while JavaScript handles the
+operation. This convention applies to resource bindings; DO references and
+`socket.send_now` keep their existing Future API.
+For older binding code, drop the trailing `.await` to use the synchronous result,
+or change the call to `async!(:method, ...)` to retain an explicit Future.
+
+KV `get` and `put(key, text, ttl: nil)` return values directly. Missing values return
 `nil`, empty values return `''`, and writes return `nil`. This adapter supports
 UTF-8 text only; invalid UTF-8 results fail rather than replacing bytes.
 D1 uses explicit `prepare` and immutable `bind` statements with `run`, `first`
-(optional column) and `raw(column_names: false)`, each returning a Future.
+(optional column) and `raw(column_names: false)`, each returning a value directly.
+Statements support `async!(:run)`, `async!(:first, column)` and
+`async!(:raw, column_names: true)`; `prepare` and `bind` remain local operations.
 The shared dispatcher checks arguments, TTL, scalar parameters, binding types
-and errors. Binding failures raise a cached `Pondro::BindingError` on await.
+and errors. Failures raise `Pondro::BindingError` at the ordinary call, or on
+await for an explicit async call.
 
 `worker/index.js` passes an explicit registry (`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`) to the
 adapter and exposes it as Ruby proxy metadata. The adapter allows KV get/put, D1 execution, R2 get, AI run and read-only stream
@@ -270,11 +282,13 @@ Configure the actual binding in Wrangler as well. Existing typed entries can
 remain in the same registry.
 
 ```ruby
-pending = bindings.SERVICE.someMethod('hello', limit: 10)
-result = pending.await
-# Calls env.SERVICE.someMethod('hello', { limit: 10 }) in JS.
+result = bindings.SERVICE.someMethod('hello', limit: 10)
+# Calls env.SERVICE.someMethod('hello', { limit: 10 }) in JS and waits.
 
-result = bindings[:SERVICE].invoke(:someMethod, 'hello').await
+pending = bindings.SERVICE.async!(:someMethod, 'hello', limit: 10)
+result = pending.await
+
+result = bindings[:SERVICE].invoke(:someMethod, 'hello')
 ```
 
 Method names and positional arguments are forwarded directly, preserving the JS
@@ -284,7 +298,7 @@ results must be JSON values: nested objects/arrays, strings, finite numbers
 `nil`. Response, Date, ArrayBuffer, streams and other special objects are rejected;
 there is no generic stream or chained resource support. JS exceptions, missing
 methods and registered bindings absent from `env` raise `Pondro::BindingError`
-when awaited. Unregistered names fail at Ruby lookup. Use `invoke` when a remote
+at the call, or when an explicit Future is awaited. Unregistered names fail at Ruby lookup. Use `invoke` when a remote
 method name collides with a Ruby method; constructor/prototype methods are blocked.
 
 `GenericProbe#call_service` exercises this path through internal RPC and is not
@@ -298,31 +312,52 @@ Registered bindings also support dot access: `bindings.AI` is equivalent to
 `bindings[:AI]`. Existing Ruby method names still require `[]` access.
 
 ```ruby
-object = bindings[:BUCKET].get('sample').await
+object = bindings[:BUCKET].get('sample')
 stream = object.body # nil when the object has no body; get returns nil if missing
 
-while (line = stream.readline.await)
+while (line = stream.readline)
   socket.send_now(line).await
 end
 
-ai_stream = bindings.AI.generate(model, { 'prompt' => 'hello' }, stream: true).await
-chunk = ai_stream.read_partial(1024).await
-rest = ai_stream.read_all(max_bytes: 65_536).await
-ai_stream.close.await
+result = bindings.AI.generate(model, { 'prompt' => 'hello' })
+pending = bindings.AI.async!(:generate, model, { 'prompt' => 'hello' })
+result = pending.await
+
+ai_stream = bindings.AI.stream!(:generate, model, { 'prompt' => 'hello' })
+chunk = ai_stream.read_partial(1024)
+rest = ai_stream.read_all(max_bytes: 65_536)
+ai_stream.close
+
+object = bindings.BUCKET.async!(:get, 'sample').await
+text = object.body.read_all
 ```
 
-R2 results expose `metadata` and a readable `body`. AI `run` is model-agnostic;
-`generate(..., stream: true)` requests a stream, while its default returns JSON.
+R2 `get` waits for the object and exposes `metadata` and a ready
+`Pondro::StreamFuture` as `body`; it does not consume the body. Missing objects
+return `nil`, and objects without a body expose `nil`. Async R2 get returns a
+regular Future whose awaited result has the same shape.
+
+AI `run` is model-agnostic, and ordinary `generate` returns JSON. `stream!(:run, ...)`
+and `stream!(:generate, ...)` force `stream: true` and return an eager
+`Pondro::StreamFuture`. Its `await` waits only for the stream to open and returns
+itself; it never consumes the body. Read methods wait for readiness automatically
+and return strings directly. Repeated await does not reopen the stream, and reads
+advance one shared cursor. Regular Futures provide `await`/`read` only.
+Stream reads now return strings directly, so remove the old trailing `.await`
+from `read_partial`, `readline`, `read_all` and `close` calls.
+An explicit `stream: true` on ordinary `generate` still returns a ready
+StreamFuture, but `stream!` is the dedicated streaming entry point.
+Generic bindings remain JSON-only and do not support streaming.
 The sample registry includes AI, but `wrangler.jsonc` leaves the AI resource
 unconfigured. Add the appropriate AI binding to use a real model; tests use a
 mock AI binding and do not call paid or remote inference.
 
 | Read operation | Result |
 | --- | --- |
-| `read_partial(n).await` | Available bytes up to n; does not wait to fill n; nil at EOF |
-| `readline(max_bytes: 1_048_576).await` | Includes newline; preserves CRLF and blank lines; returns the final unterminated line; nil at EOF |
-| `read_all(max_bytes: 1_048_576).await` | All remaining bytes; empty string at EOF; fails and cancels on overflow |
-| `close.await` | Cancels and releases the source; safe to repeat |
+| `read_partial(n)` | Available bytes up to n; does not wait to fill n; nil at EOF |
+| `readline(max_bytes: 1_048_576)` | Includes newline; preserves CRLF and blank lines; returns the final unterminated line; nil at EOF |
+| `read_all(max_bytes: 1_048_576)` | All remaining bytes; empty string at EOF; fails and cancels on overflow |
+| `close` | Cancels and releases the source; safe to repeat |
 
 All read limits are capped at 1 MiB; `read_partial` needs a positive integer.
 Reads on the same stream are serialized and share leftover bytes. Lines and

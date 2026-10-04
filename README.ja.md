@@ -109,7 +109,7 @@ coreに置き、イベントadapterを必要に応じて追加する設計が提
 | `mrbgems/pondro-websocket` | 明示的に有効化するRubyのコールバックと、接続IDによるproxy |
 | `mrbgems/pondro-async` | RPCとbinding操作で共通の、イベント内のeager Future |
 | `mrbgems/pondro-rpc` | リモートオブジェクトへの参照 |
-| `mrbgems/pondro-bindings` | Futureを返すKV・D1・R2・AIのproxyと読み出し専用Stream |
+| `mrbgems/pondro-bindings` | 同期binding proxy、明示的な非同期呼び出しと読み出し専用StreamFuture |
 | `mrbgems/pondro-wasm` | C ABI、JSPIによる共通asyncのimport、PicoRuby用のイベント駆動task HAL |
 | `mrbgems/pondro-example` | 通常のCounterと、WebSocket付きChatRoom |
 | `worker/runtime.js` | Wasmのインスタンス生成、UTF-8 JSONとメモリの受け渡し |
@@ -231,9 +231,9 @@ class MyObject < Pondro::Object
   use Pondro::Bindings
 
   def load_profile(user_id)
-    cached = bindings[:CACHE].get(user_id)
+    cached = bindings[:CACHE].async!(:get, user_id)
     stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?')
-                         .bind(user_id).first('body')
+                         .bind(user_id).async!(:first, 'body')
     { 'kv' => cached.await, 'd1' => stored.await }
   rescue Pondro::BindingError => error
     { 'error' => error.message }
@@ -241,12 +241,22 @@ class MyObject < Pondro::Object
 end
 ```
 
-KVの`get`と`put(key, text, ttl: nil)`はeager Futureを返します。存在しない値は`nil`、
+通常のbinding呼び出しは操作の完了を待ち、結果を直接返します。
+`async!(:method, *args, **options)`を指定すると、処理を即座に開始して
+`Pondro::Future`を返し、`await`でキャッシュした結果・例外を受け取れます。
+待機中はJSPIがRuby/Wasmの実行を中断し、JSは処理を継続できます。この呼び出し規則は
+resource bindingに適用し、DO参照と`socket.send_now`は既存のFuture APIを維持します。
+以前のbinding呼び出しから末尾の`.await`を外すと同期で結果を受け取れます。
+明示的なFutureが必要なら`async!(:method, ...)`へ変更してください。
+
+KVの`get`と`put(key, text, ttl: nil)`は値を直接返します。存在しない値は`nil`、
 空文字は`''`、書き込み結果は`nil`です。今回のadapterはUTF-8文字列に対応し、
 不正なUTF-8は置き換えずエラーにします。D1は明示的な`prepare`と、元のstatementを
 変更しない`bind`を使い、`run`、`first`（column指定可能）、`raw(column_names: false)`が
-Futureを返します。引数、TTL、scalar parameter、binding型、エラーの検証は共通dispatcherが
-担当し、bindingの失敗はawait時にキャッシュした`Pondro::BindingError`をraiseします。
+結果を直接返します。statementには`async!(:run)`、`async!(:first, column)`、
+`async!(:raw, column_names: true)`も使えます。`prepare`と`bind`はローカル操作です。
+引数、TTL、scalar parameter、binding型、エラーの検証は共通dispatcherが担当します。
+失敗は通常の呼び出し時、または明示的なFutureのawait時に`Pondro::BindingError`になります。
 
 `worker/index.js`から明示的な型一覧（`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`）をadapterへ渡し、
 Rubyにはproxy用のmetadataとして渡します。接続層はKVのget/put、D1の実行、R2のget、AIのrunとstreamの読み出し操作を許可します。
@@ -277,11 +287,13 @@ Ruby側に専用proxyがないbindingは、`BindingAdapter`へ渡す一覧に
 設定してください。既存の型付きbindingと同じ一覧に登録できます。
 
 ```ruby
-pending = bindings.SERVICE.someMethod('hello', limit: 10)
-result = pending.await
-# JSでは env.SERVICE.someMethod('hello', { limit: 10 }) を呼びます。
+result = bindings.SERVICE.someMethod('hello', limit: 10)
+# JSでは env.SERVICE.someMethod('hello', { limit: 10 }) を呼び、結果を待ちます。
 
-result = bindings[:SERVICE].invoke(:someMethod, 'hello').await
+pending = bindings.SERVICE.async!(:someMethod, 'hello', limit: 10)
+result = pending.await
+
+result = bindings[:SERVICE].invoke(:someMethod, 'hello')
 ```
 
 メソッド名と位置引数をそのまま転送し、JSのreceiverも保持します。Rubyのキーワード
@@ -289,7 +301,7 @@ result = bindings[:SERVICE].invoke(:someMethod, 'hello').await
 object・array、文字列、有限の数値（整数はJSの安全な範囲内）、boolean、nullを扱えます。
 JSの`undefined`はRubyの`nil`になります。Response、Date、ArrayBuffer、streamなどの
 特殊objectはエラーになり、汎用のstreamやresourceのメソッドチェーンには対応しません。
-JSの例外、存在しないメソッド、登録済みでも`env`に実在しないbindingは、await時に
+JSの例外、存在しないメソッド、登録済みでも`env`に実在しないbindingは、通常の呼び出し時、または明示的なFutureのawait時に
 `Pondro::BindingError`になります。未登録の名前はRuby側のlookupで失敗します。
 Rubyのメソッド名と衝突する場合は`invoke`を使えます。constructor・prototypeの
 メソッドは呼び出せません。
@@ -304,31 +316,52 @@ Rubyのメソッド名と衝突する場合は`invoke`を使えます。construc
 返します。既存のRubyメソッド名と衝突するbinding名は`[]`で参照してください。
 
 ```ruby
-object = bindings[:BUCKET].get('sample').await
+object = bindings[:BUCKET].get('sample')
 stream = object.body # bodyがない場合はnil。存在しないobjectのgetもnil
 
-while (line = stream.readline.await)
+while (line = stream.readline)
   socket.send_now(line).await
 end
 
-ai_stream = bindings.AI.generate(model, { 'prompt' => 'hello' }, stream: true).await
-chunk = ai_stream.read_partial(1024).await
-rest = ai_stream.read_all(max_bytes: 65_536).await
-ai_stream.close.await
+result = bindings.AI.generate(model, { 'prompt' => 'hello' })
+pending = bindings.AI.async!(:generate, model, { 'prompt' => 'hello' })
+result = pending.await
+
+ai_stream = bindings.AI.stream!(:generate, model, { 'prompt' => 'hello' })
+chunk = ai_stream.read_partial(1024)
+rest = ai_stream.read_all(max_bytes: 65_536)
+ai_stream.close
+
+object = bindings.BUCKET.async!(:get, 'sample').await
+text = object.body.read_all
 ```
 
-R2の結果は`metadata`と読み出し用の`body`を持ちます。AIの`run`はmodelに依存しないAPIで、
-`generate(..., stream: true)`はstreamを要求し、デフォルトではJSONを返します。
+R2の`get`はobjectの取得を待って結果を返し、`metadata`と準備済みの
+`Pondro::StreamFuture`である`body`を持ちます。bodyの内容はまだ読み出しません。
+存在しないobjectは`nil`、bodyのないobjectの`body`も`nil`です。
+非同期のR2 getは通常のFutureを返し、awaitすると同じ形の結果になります。
+
+AIの`run`はmodelに依存しないAPIで、通常の`generate`はJSONを返します。
+`stream!(:run, ...)`と`stream!(:generate, ...)`は`stream: true`を強制し、
+eagerな`Pondro::StreamFuture`を返します。`await`はstreamの準備だけを待って自身を返し、
+bodyを消費しません。各読み出しメソッドは必要なら準備を待ち、文字列を直接返します。
+awaitを繰り返してもstreamは開き直さず、読み出しは同じカーソルを進めます。
+通常のFutureは`await`とその別名`read`のみを提供します。
+読み出しは文字列を直接返すため、以前の`read_partial`、`readline`、`read_all`、
+`close`の呼び出しに付けていた`.await`は外してください。
+従来どおり通常の`generate`に`stream: true`を明示しても準備済みのStreamFutureを
+返しますが、stream専用の入口は`stream!`です。generic bindingはJSON専用で、
+streamには対応しません。
 サンプルの型一覧にはAIがありますが、`wrangler.jsonc`ではAI resourceを設定していません。
 実際のmodelを利用する場合は対応するbindingを設定してください。
 テストではAI bindingのmockを使い、課金される推論やremoteの推論は呼び出しません。
 
 | 読み出し操作 | 結果 |
 | --- | --- |
-| `read_partial(n).await` | 最大nバイトの届いた分を返す。nが埋まるまで待たず、EOFではnil |
-| `readline(max_bytes: 1_048_576).await` | 改行を含む。CRLF・空行・最後の改行なしの行を保持し、EOFではnil |
-| `read_all(max_bytes: 1_048_576).await` | 残り全体。EOFでは空文字。上限を超えたらエラーにしてキャンセル |
-| `close.await` | sourceをキャンセルして解放。繰り返し可能 |
+| `read_partial(n)` | 最大nバイトの届いた分を返す。nが埋まるまで待たず、EOFではnil |
+| `readline(max_bytes: 1_048_576)` | 改行を含む。CRLF・空行・最後の改行なしの行を保持し、EOFではnil |
+| `read_all(max_bytes: 1_048_576)` | 残り全体。EOFでは空文字。上限を超えたらエラーにしてキャンセル |
+| `close` | sourceをキャンセルして解放。繰り返し可能 |
 
 読み出し上限はすべて最大1 MiBで、`read_partial`には正の整数が必要です。
 同じstreamの読み出しは直列化し、読み残しを共有します。行とchunkはバイナリのRuby文字列です。

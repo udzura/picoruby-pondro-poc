@@ -71,15 +71,15 @@ class BindingProbe < Pondro::Object
   def store_note(text)
     raise ArgumentError, 'Note must be a string of at most 4096 bytes' unless text.is_a?(String) && text.bytesize <= 4096
     db = bindings[:DB]
-    db.prepare('CREATE TABLE IF NOT EXISTS pondro_notes (id TEXT PRIMARY KEY, body TEXT NOT NULL)').run.await
-    db.prepare('INSERT OR REPLACE INTO pondro_notes (id, body) VALUES (?, ?)').bind(id, text).run.await
-    bindings[:CACHE].put(id, text).await
+    db.prepare('CREATE TABLE IF NOT EXISTS pondro_notes (id TEXT PRIMARY KEY, body TEXT NOT NULL)').run
+    db.prepare('INSERT OR REPLACE INTO pondro_notes (id, body) VALUES (?, ?)').bind(id, text).run
+    bindings[:CACHE].put(id, text)
     read_note
   end
 
   def read_note
-    cached = bindings[:CACHE].get(id)
-    stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?').bind(id).first('body')
+    cached = bindings[:CACHE].async!(:get, id)
+    stored = bindings[:DB].prepare('SELECT body FROM pondro_notes WHERE id = ?').bind(id).async!(:first, 'body')
     { 'kv' => cached.await, 'd1' => stored.await }
   end
 end
@@ -92,7 +92,7 @@ class StreamProbe < Pondro::Object
   rpc :read_ai, :abandon_read, :abandon_open
 
   def read_object(key, mode = 'read_all', limit = 1024 * 1024)
-    object = bindings[:BUCKET].get(key).await
+    object = bindings[:BUCKET].get(key)
     return nil unless object
     stream = object.body
     return nil unless stream
@@ -100,25 +100,29 @@ class StreamProbe < Pondro::Object
   end
 
   def abandon_read(key)
-    bindings[:BUCKET].get(key).await.body.read_partial(1)
+    # Probe low-level eager-read cleanup; public StreamFuture reads wait directly.
+    object = bindings[:BUCKET].async!(:get, key).await
+    object.body.__send__(:future_read, 'read_partial', 1)
     'abandoned'
   end
 
   def abandon_open(key)
-    bindings[:BUCKET].get(key)
+    bindings[:BUCKET].async!(:get, key)
     'abandoned'
   end
 
   def read_ai(model, input, mode = 'read_all', limit = 1024 * 1024)
-    stream = bindings.AI.generate(model, input, stream: true).await
-    consume_stream(stream, mode, limit)
+    stream = bindings.AI.stream!(:generate, model, input)
+    value = consume_stream(stream, mode, limit)
+    raise 'Stream await must return itself' unless stream.await.equal?(stream) && stream.await.equal?(stream)
+    value
   end
 
   def consume_stream(stream, mode, limit)
     value = case mode
-    when 'read_partial' then stream.read_partial(limit).await
-    when 'readline' then stream.readline(max_bytes: limit).await
-    when 'read_all' then stream.read_all(max_bytes: limit).await
+    when 'read_partial' then stream.read_partial(limit)
+    when 'readline' then stream.readline(max_bytes: limit)
+    when 'read_all' then stream.read_all(max_bytes: limit)
     else raise ArgumentError, 'Unknown read mode'
     end
     value.nil? ? nil : value.bytes
@@ -129,8 +133,8 @@ class StreamProbe < Pondro::Object
   end
 
   def on_message(socket, key)
-    stream = bindings[:BUCKET].get(key).await.body
-    while (line = stream.readline.await)
+    stream = bindings[:BUCKET].get(key).body
+    while (line = stream.readline)
       socket.send_now(JSON.generate({ 'type' => 'line', 'text' => line })).await
     end
     socket.send(JSON.generate({ 'type' => 'done' }))
@@ -143,13 +147,20 @@ class GenericProbe < Pondro::Object
   use Pondro::Bindings
   rpc :call_service
   rpc :execute_service
+  rpc :execute_pair
 
   def call_service(name, method, args = [], options = {})
-    bindings[name].invoke(method, *args, **options).await
+    bindings[name].invoke(method, *args, **options)
   end
 
   def execute_service(args = [], options = {})
-    bindings.SERVICE.execute(*args, **options).await
+    bindings.SERVICE.execute(*args, **options)
+  end
+
+  def execute_pair
+    first = bindings.SERVICE.async!(:execute, 'first')
+    second = bindings.SERVICE.async!(:execute, 'second')
+    [first.await, second.await]
   end
 end
 Pondro.register('GenericProbe', GenericProbe)

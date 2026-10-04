@@ -35,7 +35,7 @@ test('generic calls preserve receiver and JSON values, and reject missing or non
   assert.equal(await adapter.invoke({ operation: 'kv.get', binding: 'CACHE', args: ['key'] }), null);
 });
 
-test('Ruby generic Futures forward positional and keyword arguments through the real Wasm bridge', async () => {
+test('Ruby synchronous generic calls forward positional and keyword arguments through the real Wasm bridge', async () => {
   const adapter = new BindingAdapter({ SERVICE: {
     label: 'received',
     async execute(...args) { return { label: this.label, args }; }
@@ -54,6 +54,32 @@ test('Ruby generic Futures forward positional and keyword arguments through the 
     const missing = await runtime.dispatch({ ...event,
       payload: { method: 'call_service', args: ['MISSING', 'execute'] } }, request => adapter.invoke(request));
     assert.deepEqual(missing, { ok: false, error: 'Binding is not configured: MISSING' });
+  } finally { runtime.destroy(); }
+});
+
+test('explicit async! starts both generic calls before waiting for their results', { timeout: 5000 }, async () => {
+  const calls = [];
+  const resolvers = [];
+  let started;
+  const bothStarted = new Promise(resolve => { started = resolve; });
+  const adapter = new BindingAdapter({ SERVICE: {
+    execute(message) {
+      calls.push(message);
+      if (calls.length === 2) started();
+      return new Promise(resolve => resolvers.push(resolve));
+    }
+  } }, { SERVICE: 'generic' });
+  const runtime = new RubyRuntime(module);
+  try {
+    const pending = runtime.dispatch({ class: 'GenericProbe', id: 'pair', type: 'rpc',
+      context: adapter.context(), payload: { method: 'execute_pair' } }, request => adapter.invoke(request));
+    await bothStarted;
+    assert.deepEqual(calls, ['first', 'second']);
+    resolvers[1]('second result');
+    resolvers[0]('first result');
+    const result = await pending;
+    assert.equal(result.ok, true, result.error);
+    assert.deepEqual(result.value, ['first result', 'second result']);
   } finally { runtime.destroy(); }
 });
 

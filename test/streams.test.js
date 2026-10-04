@@ -125,11 +125,20 @@ test('real Ruby sends each complete line before stream EOF through send_now', { 
   } finally { runtime.destroy(); }
 });
 
-test('real Wasm AI.generate returns a readable proxy for split SSE bytes', { timeout: 5000 }, async () => {
-  const adapter = fixture(new ReadableStream({ start(c) {
+test('real Wasm AI.stream! returns a StreamFuture for split SSE bytes', { timeout: 5000 }, async () => {
+  const source = new ReadableStream({ start(c) {
     for (const byte of encoder.encode('data: 日本語\n\n')) c.enqueue(new Uint8Array([byte]));
     c.close();
-  } }));
+  } });
+  let opens = 0;
+  const adapter = fixture(source, { AI: { async run(model, input, options) {
+    assert.equal(input.stream, true);
+    assert.equal(input.prompt, 'hello');
+    assert.deepEqual(options, {});
+    opens++;
+    await new Promise(resolve => setTimeout(resolve, 1));
+    return source;
+  } } });
   const runtime = new RubyRuntime(module);
   try {
     const event = { class: 'StreamProbe', id: 'ai', type: 'rpc', context: adapter.context(),
@@ -137,6 +146,7 @@ test('real Wasm AI.generate returns a readable proxy for split SSE bytes', { tim
     const result = await runtime.dispatch(event, request => adapter.invoke(request));
     assert.equal(result.ok, true);
     assert.deepEqual(result.value, [...encoder.encode('data: 日本語\n')]);
+    assert.equal(opens, 1);
   } finally { await adapter.finishEvent(); runtime.destroy(); }
 });
 
