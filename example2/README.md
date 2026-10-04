@@ -15,8 +15,16 @@ npm run build
 npm run dev:example2:mock
 ```
 
-Open <http://localhost:8787/example2/>. Mock AI echoes the personality and latest
+Open <http://localhost:8787/example2/?admin=1> to create and invite AIs. Mock AI echoes the personality and latest
 message, using local DOs and no remote inference. The UI labels this mode clearly.
+
+The language selector switches between Japanese and English without reconnecting
+or changing messages or personality prompts. Its preference is saved in the browser;
+the initial language follows the browser language.
+Share `/example2/` with demo participants: without `admin=1`, AI settings and
+creation/invitation controls are disabled, while joining rooms and chatting work
+normally. This is a UI-only switch, not server-side authorization; the API and
+participant removal are unchanged.
 
 1. Enter a Room ID and your name, then connect.
 2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.
