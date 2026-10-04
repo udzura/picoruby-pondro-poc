@@ -96,4 +96,16 @@ class FutureTest < Minitest::Test
     assert_raises(NoMethodError) { env.AI { 'unexpected' } }
   end
 
+  def test_generic_binding_forwards_keywords_and_supports_explicit_invoke
+    env = Pondro::Bindings::Environment.new({ 'SERVICE' => 'generic' })
+    assert_equal 7, env.SERVICE.execute(1, enabled: true).await
+    assert_equal({ 'kind' => 'binding', 'operation' => 'pondro.call', 'binding' => 'SERVICE',
+      'args' => ['execute', '[1,{"enabled":true}]'] }, Pondro.requests.first)
+    assert_equal 7, env.SERVICE.invoke(:class).await
+    assert_equal 'class', Pondro.requests.last['args'].first
+    assert_raises(ArgumentError) { env.SERVICE.execute { 'unsupported' } }
+    Pondro.response = { 'ok' => false, 'error' => 'Binding is not configured: SERVICE' }
+    assert_raises(Pondro::BindingError) { env.SERVICE.execute.await }
+  end
+
 end

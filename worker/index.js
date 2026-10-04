@@ -8,7 +8,7 @@ import { BindingAdapter } from './adapters/bindings.js';
 const MAX_BODY_BYTES = 8192;
 
 function route(url) {
-  const match = url.pathname.match(/^\/(api|ws)\/(Counter|ChatRoom|BindingProbe|StreamProbe)\/([^/]+)$/);
+  const match = url.pathname.match(/^\/(api|ws)\/(Counter|ChatRoom|BindingProbe|StreamProbe|GenericProbe)\/([^/]+)$/);
   if (!match) return null;
   const id = decodeURIComponent(match[3]);
   if (!id || id.length > 128) throw new Error('Invalid object ID');
@@ -45,7 +45,7 @@ export class PondroObject extends DurableObject {
     super(ctx, env);
     const bindings = new BindingAdapter(env, { CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai' });
     this.host = new PondroHost(ctx, new RubyRuntime(module), [bindings], async (request, chain) => {
-      if (!['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe'].includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
+      if (!['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe'].includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
         throw new Error('Invalid remote PONDRO identity');
       }
       const id = env.PONDRO.idFromName(JSON.stringify([request.class, request.id]));

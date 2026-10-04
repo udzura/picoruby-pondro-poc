@@ -206,7 +206,7 @@ chainの長さは最大16オブジェクトに制限しています。リモー�
 これにより、別々に開始した呼び出しがbusyなオブジェクト間で互いを待つ場合も、
 待機時間を制限します。timeoutはリモート操作をキャンセルしません。操作が後から完了し、
 リモートのstateを変更する可能性があります。
-デモのJS resolverはCounter、ChatRoom、BindingProbeに対応しています。Rubyクラスを追加する場合は、
+デモのJS resolverはCounter、ChatRoom、BindingProbe、StreamProbe、GenericProbeに対応しています。Rubyクラスを追加する場合は、
 JS側のルーティングとresolverにも追加する必要があります。
 
 JS adapterはCloudflareのhibernation API（`acceptWebSocket`、`getWebSockets`、
@@ -250,7 +250,7 @@ Futureを返します。引数、TTL、scalar parameter、binding型、エラー
 
 `worker/index.js`から明示的な型一覧（`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`）をadapterへ渡し、
 Rubyにはproxy用のmetadataとして渡します。接続層はKVのget/put、D1の実行、R2のget、AIのrunとstreamの読み出し操作を許可します。
-R2への書き込み、stream出力、任意のhost操作は公開しません。
+型付きR2 proxyは読み出しに対応します。
 `wrangler.jsonc`のKV・D1のIDはローカルデモ用の仮の値なので、デプロイする場合は
 実際のresource IDに変更してください。setupやテストはCloudflare上のresourceを作成しません。
 
@@ -269,6 +269,34 @@ curl -X POST http://localhost:8787/api/BindingProbe/note \
 整合性の特性により以前の値が返る場合があります。
 upstreamとの共通mgem抽出は今後の対象です。現段階では再現可能なJSのsnapshotとして
 依存を取り込み、読み出しstreamは現在のイベントが所有します。
+
+## 汎用bindingの呼び出し
+
+Ruby側に専用proxyがないbindingは、`BindingAdapter`へ渡す一覧に
+`{ SERVICE: 'generic' }`のように登録できます。Wranglerにも実際のbindingを
+設定してください。既存の型付きbindingと同じ一覧に登録できます。
+
+```ruby
+pending = bindings.SERVICE.someMethod('hello', limit: 10)
+result = pending.await
+# JSでは env.SERVICE.someMethod('hello', { limit: 10 }) を呼びます。
+
+result = bindings[:SERVICE].invoke(:someMethod, 'hello').await
+```
+
+メソッド名と位置引数をそのまま転送し、JSのreceiverも保持します。Rubyのキーワード
+引数は末尾のoptions objectになります。引数と戻り値はJSONの値に対応し、ネストした
+object・array、文字列、有限の数値（整数はJSの安全な範囲内）、boolean、nullを扱えます。
+JSの`undefined`はRubyの`nil`になります。Response、Date、ArrayBuffer、streamなどの
+特殊objectはエラーになり、汎用のstreamやresourceのメソッドチェーンには対応しません。
+JSの例外、存在しないメソッド、登録済みでも`env`に実在しないbindingは、await時に
+`Pondro::BindingError`になります。未登録の名前はRuby側のlookupで失敗します。
+Rubyのメソッド名と衝突する場合は`invoke`を使えます。constructor・prototypeの
+メソッドは呼び出せません。
+
+`GenericProbe#call_service`は内部RPCからこの経路を確認するサンプルで、HTTPには
+公開していません。別途generic bindingの設定が必要です。登録したbindingでは
+対応する任意のメソッドを呼べるため、Rubyに公開したいbinding名を登録してください。
 
 ## R2・AIのstream読み出し
 

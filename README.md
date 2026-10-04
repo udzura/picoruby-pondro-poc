@@ -198,7 +198,7 @@ or exactly-once guarantees. Call chains reject self-calls and cycles within
 the propagated chain and are limited to 16 objects. Remote calls have a
 10-second timeout, also bounding independently initiated wait cycles between
 busy objects. Timeout does not cancel a remote operation: it may still complete
-and change remote state. The demo's JS resolver supports Counter, ChatRoom and BindingProbe;
+and change remote state. The demo's JS resolver supports Counter, ChatRoom, BindingProbe, StreamProbe and GenericProbe;
 adding another Ruby class also requires adding it to the JS routing/resolver.
 
 The JS adapter uses Cloudflare's hibernation API (`acceptWebSocket`,
@@ -242,7 +242,7 @@ and errors. Binding failures raise a cached `Pondro::BindingError` on await.
 
 `worker/index.js` passes an explicit registry (`CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai'`) to the
 adapter and exposes it as Ruby proxy metadata. The adapter allows KV get/put, D1 execution, R2 get, AI run and read-only stream
-operations. R2 writes, stream output and arbitrary host operations are not exposed. Add real KV/D1
+operations. The typed R2 proxy exposes reads only. Add real KV/D1
 resource IDs to `wrangler.jsonc` before deployment; the included IDs are local
 demo placeholders. Setup and tests do not create Cloudflare resources.
 
@@ -261,6 +261,36 @@ and writes across KV/D1 are not atomic. Local KV tests permit immediate reads;
 production KV consistency may return a previous value after a write.
 A shared upstream mgem extraction remains future work; the dependency is currently
 a reproducible JS snapshot. Readable streams are owned by the current event.
+
+## Generic binding calls
+
+For a binding without a typed Ruby proxy, add its name as `generic` to the
+registry passed to `BindingAdapter`, for example `{ SERVICE: 'generic' }`.
+Configure the actual binding in Wrangler as well. Existing typed entries can
+remain in the same registry.
+
+```ruby
+pending = bindings.SERVICE.someMethod('hello', limit: 10)
+result = pending.await
+# Calls env.SERVICE.someMethod('hello', { limit: 10 }) in JS.
+
+result = bindings[:SERVICE].invoke(:someMethod, 'hello').await
+```
+
+Method names and positional arguments are forwarded directly, preserving the JS
+receiver. Ruby keyword arguments become a final options object. Arguments and
+results must be JSON values: nested objects/arrays, strings, finite numbers
+(integers within JS's safe range), booleans and null. JS `undefined` returns Ruby
+`nil`. Response, Date, ArrayBuffer, streams and other special objects are rejected;
+there is no generic stream or chained resource support. JS exceptions, missing
+methods and registered bindings absent from `env` raise `Pondro::BindingError`
+when awaited. Unregistered names fail at Ruby lookup. Use `invoke` when a remote
+method name collides with a Ruby method; constructor/prototype methods are blocked.
+
+`GenericProbe#call_service` exercises this path through internal RPC and is not
+exported over HTTP. It requires a configured generic binding. Generic calls can
+perform any supported method on that binding, so register the names you intend
+to expose to Ruby.
 
 ## Reading R2 and AI streams
 

@@ -137,3 +137,19 @@ class StreamProbe < Pondro::Object
   end
 end
 Pondro.register('StreamProbe', StreamProbe)
+
+# Generic binding smoke sample; names must be exported by the JS registry.
+class GenericProbe < Pondro::Object
+  use Pondro::Bindings
+  rpc :call_service
+  rpc :execute_service
+
+  def call_service(name, method, args = [], options = {})
+    bindings[name].invoke(method, *args, **options).await
+  end
+
+  def execute_service(args = [], options = {})
+    bindings.SERVICE.execute(*args, **options).await
+  end
+end
+Pondro.register('GenericProbe', GenericProbe)

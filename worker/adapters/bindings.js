@@ -4,7 +4,7 @@ import { encodeHostCall, decodeHostResult, HostResultKind } from '../upstream/ho
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
-const operations = { 'kv.get': 'kv', 'kv.put': 'kv', 'd1.execute': 'd1', 'r2.get': 'r2', 'ai.run': 'ai' };
+const operations = { 'kv.get': 'kv', 'kv.put': 'kv', 'd1.execute': 'd1', 'r2.get': 'r2', 'ai.run': 'ai', 'pondro.call': 'generic' };
 
 // The shared dispatcher owns validation and PHC1/PHB1 encoding. This adapter
 // only connects its byte frames to Pondro's event-local JSON/Future ABI.
@@ -13,7 +13,28 @@ export class BindingAdapter {
     this.env = env;
     this.streams = new ReadStreams();
     this.types = Object.freeze({ ...types });
-    this.bridge = createCloudflareBindings(env, this.types).picorbWorkerHostCallBridge;
+    this.hostTypes = Object.fromEntries(Object.entries(this.types).filter(([, type]) => type !== 'generic'));
+    this.plugins = [{ id: 'pondro', create: (environment, host) => ({
+      'pondro.call': { arity: 3, call: async ([binding, method, argumentsJson]) => {
+        const name = host.text(binding);
+        const methodName = host.text(method);
+        if (!Object.hasOwn(this.types, name) || this.types[name] !== 'generic') throw host.bindingError('Binding is not exported: ' + name);
+        const target = environment[name];
+        if (!Object.hasOwn(environment, name) || target === undefined || target === null) throw host.bindingError('Binding is not configured: ' + name);
+        if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(methodName) || ['constructor', '__proto__', 'prototype'].includes(methodName)) {
+          throw host.argumentError('Invalid binding method');
+        }
+        const fn = target[methodName];
+        if (typeof fn !== 'function') throw host.argumentError('Binding method is not callable: ' + methodName);
+        const args = JSON.parse(host.text(argumentsJson));
+        if (!Array.isArray(args)) throw host.argumentError('Binding arguments must be an array');
+        // Use the common bridge's JSON validation for arguments and results.
+        host.json(args);
+        const value = await Reflect.apply(fn, target, args);
+        return host.json(value === undefined ? null : value);
+      } }
+    }) }];
+    this.bridge = createCloudflareBindings(env, this.hostTypes, { plugins: this.plugins }).picorbWorkerHostCallBridge;
   }
 
   context() { return { binding_types: this.types }; }
@@ -41,7 +62,8 @@ export class BindingAdapter {
     if (!Array.isArray(request.args) || request.args.some(arg => typeof arg !== 'string')) {
       throw new Error('Binding arguments must be UTF-8 strings');
     }
-    const frame = encodeHostCall(request.operation, request.binding, request.args.map(arg => encoder.encode(arg)));
+    const args = request.operation === 'pondro.call' ? [request.binding, ...request.args] : request.args;
+    const frame = encodeHostCall(request.operation, request.operation === 'pondro.call' ? '' : request.binding, args.map(arg => encoder.encode(arg)));
     let captured;
     let bridge = this.bridge;
     if (request.operation === 'r2.get' || request.operation === 'ai.run') {
@@ -70,7 +92,7 @@ export class BindingAdapter {
           return typeof value === 'function' ? value.bind(object) : value;
         }
       });
-      bridge = createCloudflareBindings(env, this.types).picorbWorkerHostCallBridge;
+      bridge = createCloudflareBindings(env, this.hostTypes).picorbWorkerHostCallBridge;
     }
     const result = decodeHostResult(await bridge(frame));
     if (result.kind === HostResultKind.hostStream || (result.kind === HostResultKind.ok && captured)) {
@@ -85,6 +107,6 @@ export class BindingAdapter {
     if (result.kind !== HostResultKind.ok) throw new Error(decoder.decode(result.payload));
     if (request.operation === 'kv.put') return null;
     const text = decoder.decode(result.payload);
-    return ['d1.execute', 'ai.run', 'r2.get'].includes(request.operation) ? JSON.parse(text) : text;
+    return ['d1.execute', 'ai.run', 'r2.get', 'pondro.call'].includes(request.operation) ? JSON.parse(text) : text;
   }
 }

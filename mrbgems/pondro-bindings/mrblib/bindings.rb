@@ -35,6 +35,7 @@ module Pondro
         when 'd1' then D1.new(name)
         when 'r2' then R2.new(name)
         when 'ai' then AI.new(name)
+        when 'generic' then Generic.new(name)
         else raise BindingError, 'Unknown or unsupported binding: ' + name
         end
       end
@@ -48,6 +49,28 @@ module Pondro
       def call(operation, *args, &transform)
         Future.new({ 'kind' => 'binding', 'operation' => operation,
                      'binding' => @name, 'args' => args }, BindingError, &transform)
+      end
+    end
+
+    class Generic
+      def initialize(name)
+        @name = name
+      end
+
+      def method_missing(name, *args, **options, &block)
+        invoke(name, *args, **options, &block)
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        true
+      end
+
+      # Escape hatch for remote methods that collide with Ruby's own methods.
+      def invoke(name, *args, **options, &block)
+        raise ArgumentError, 'Binding calls do not accept blocks' if block
+        args << options unless options.empty?
+        Future.new({ 'kind' => 'binding', 'operation' => 'pondro.call',
+                     'binding' => @name, 'args' => [name.to_s, JSON.generate(args)] }, BindingError)
       end
     end
 

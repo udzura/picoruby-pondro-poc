@@ -7,6 +7,56 @@ import { RubyRuntime } from '../worker/runtime.js';
 
 const module = new WebAssembly.Module(readFileSync(new URL('../dist/pondro.wasm', import.meta.url)));
 
+test('generic calls preserve receiver and JSON values, and reject missing or non-JSON resources', async () => {
+  const service = {
+    label: 'service',
+    async execute(...args) { return { label: this.label, args }; },
+    nothing() {},
+    fail() { throw new Error('service failed'); },
+    special() { return new Date(); },
+    stream() { return new ReadableStream(); }
+  };
+  const adapter = new BindingAdapter({ SERVICE: service, CACHE: { get: async () => null, put: async () => {} } },
+    { SERVICE: 'generic', MISSING: 'generic', CACHE: 'kv' });
+  const call = (method, args = [], binding = 'SERVICE') => adapter.invoke({
+    operation: 'pondro.call', binding, args: [method, JSON.stringify(args)]
+  });
+  const args = [null, false, 3, '日本語', [1], { nested: { yes: true } }];
+  assert.deepEqual(await call('execute', args), { label: 'service', args });
+  assert.equal(await call('nothing'), null);
+  await assert.rejects(call('execute', [], 'MISSING'), /not configured/);
+  await assert.rejects(call('execute', [], 'UNKNOWN'), /binding type/);
+  await assert.rejects(call('absent'), /not callable/);
+  await assert.rejects(call('label'), /not callable/);
+  await assert.rejects(call('constructor'), /Invalid binding method/);
+  await assert.rejects(call('fail'), /service failed/);
+  await assert.rejects(call('special'), /JSON|plain/i);
+  await assert.rejects(call('stream'), /JSON|plain/i);
+  assert.equal(await adapter.invoke({ operation: 'kv.get', binding: 'CACHE', args: ['key'] }), null);
+});
+
+test('Ruby generic Futures forward positional and keyword arguments through the real Wasm bridge', async () => {
+  const adapter = new BindingAdapter({ SERVICE: {
+    label: 'received',
+    async execute(...args) { return { label: this.label, args }; }
+  } }, { SERVICE: 'generic', MISSING: 'generic' });
+  const runtime = new RubyRuntime(module);
+  const event = { class: 'GenericProbe', id: 'generic', type: 'rpc', context: adapter.context(),
+    payload: { method: 'call_service', args: ['SERVICE', 'execute', [1, '日本語'], { enabled: true }] } };
+  try {
+    const result = await runtime.dispatch(event, request => adapter.invoke(request));
+    assert.equal(result.ok, true, result.error);
+    assert.deepEqual(result.value, { label: 'received', args: [1, '日本語', { enabled: true }] });
+    const dynamic = await runtime.dispatch({ ...event,
+      payload: { method: 'execute_service', args: [[1, '日本語'], { enabled: true }] } }, request => adapter.invoke(request));
+    assert.equal(dynamic.ok, true, dynamic.error);
+    assert.deepEqual(dynamic.value, result.value);
+    const missing = await runtime.dispatch({ ...event,
+      payload: { method: 'call_service', args: ['MISSING', 'execute'] } }, request => adapter.invoke(request));
+    assert.deepEqual(missing, { ok: false, error: 'Binding is not configured: MISSING' });
+  } finally { runtime.destroy(); }
+});
+
 test('upstream codec and dispatcher are unchanged at the pinned revision', () => {
   const manifest = JSON.parse(readFileSync(new URL('../worker/upstream/source.json', import.meta.url)));
   for (const [name, entry] of Object.entries(manifest.files)) {
