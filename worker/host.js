@@ -1,11 +1,12 @@
 // Storage/event orchestration is independent of the Cloudflare HTTP adapter.
 export class PondroHost {
-  constructor(ctx, runtime, adapters = [], remote = null, bindings = null) {
+  constructor(ctx, runtime, adapters = [], remote = null, bindings = null, { diagnostic = false } = {}) {
     this.ctx = ctx;
     this.runtime = runtime;
     this.adapters = adapters;
     this.remote = remote;
     this.bindings = bindings;
+    this.diagnostic = diagnostic;
     this.tail = Promise.resolve();
     this.activeIdentity = null;
   }
@@ -52,7 +53,9 @@ export class PondroHost {
       context: Object.assign({}, ...this.adapters.map(adapter => adapter.context()))
     }, request => {
       if (request.kind === 'log') {
-        console.error('PONDRO diagnostic', { ...request.details, object: identity });
+        if (request.level === 'info' && !this.diagnostic) return null;
+        const log = request.level === 'info' ? console.info : console.error;
+        log('PONDRO diagnostic', { ...request.details, object: identity });
         return null;
       }
       if (request.kind === 'socket') {

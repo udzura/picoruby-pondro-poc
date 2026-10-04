@@ -68,12 +68,62 @@ class AgentTest < Minitest::Test
     assert_equal '日本語🌿', agent.memory['value']
     assert_equal 'call-1', binding.inputs.last['messages'].last['tool_call_id']
   end
+  def test_openai_compat_tools_mix_with_native_tools_and_roundtrip
+    klass = Class.new(TestAgent)
+    klass.tool(:echo, openai_compat: true, description: 'Echo a value', parameters: {
+      'type' => 'object', 'properties' => { 'value' => { 'type' => 'string' } },
+      'required' => ['value'], 'additionalProperties' => false
+    })
+    klass.define_method(:echo) { |args| args['value'] }
+    child = Class.new(klass)
+    instance = child.new('compat', {}, {})
+    definition = JSON.parse(JSON.generate(child.tools))
+    request = { 'id' => 'echo-1', 'function' => { 'name' => 'echo', 'arguments' => '{"value":"hello"}' } }
+    binding = Binding.new({ 'choices' => [{ 'message' => { 'tool_calls' => [request] } }] }, { 'response' => 'Done' })
+    result = instance.run!(binding, 'test', input: 'Echo hello')
+    assert_equal 'Done', result['text']
+    binding.inputs.each do |input|
+      assert_equal TestAgent.tools['remember'], input['tools'][0]
+      assert_equal({ 'type' => 'function', 'function' => {
+        'name' => 'echo', 'description' => 'Echo a value', 'parameters' => child.tools['echo']['parameters']
+      } }, input['tools'][1])
+    end
+    assert_equal definition, child.tools, 'conversion must not mutate registered definitions'
+    assert_equal 'echo-1', binding.inputs.last['messages'].last['tool_call_id']
+    assert_equal 'hello', JSON.parse(binding.inputs.last['messages'].last['content'])
+    bad = Binding.new({ 'tool_calls' => [call('echo', { 'value' => 42 })] })
+    assert_raises(Pondro::Agent::Error) { instance.run!(bad, 'test', input: 'Invalid value') }
+    assert_raises(ArgumentError) do
+      klass.tool(:bad, openai_compat: 'true', description: 'Bad', parameters: { 'type' => 'object' })
+    end
+  end
   def test_invalid_batch_executes_no_tools
     [call('send'), call('remember', {}), call('remember', { 'value' => 1 }), call('remember', { 'value' => 'x', 'extra' => true })].each do |invalid|
       binding = Binding.new({ 'tool_calls' => [call, invalid] })
       assert_raises(Pondro::Agent::Error) { agent.run!(binding, 'test', input: 'hello') }
       assert_empty agent.memory
     end
+  end
+  def test_trace_exposes_reasoning_only_response_after_tool_execution
+    trace = []
+    binding = Binding.new({ 'tool_calls' => [call] }, {
+      'choices' => [{ 'finish_reason' => 'length', 'message' => {
+        'content' => nil, 'reasoning_content' => 'Internal reasoning'
+      } }], 'usage' => { 'completion_tokens' => 512 }
+    })
+    error = assert_raises(Pondro::Agent::Error) do
+      agent.run!(binding, 'test', input: 'Remember blue', trace: ->(event) { trace << event })
+    end
+    assert_match(/finish_reason=length, reasoning_bytes=18/, error.message)
+    assert_equal 'blue', agent.memory['value']
+    assert_equal ['model_start', 'model_response', 'tool_start', 'tool_result', 'model_start', 'model_response'],
+                 trace.map { |event| event['event'] }
+    assert_equal [1, 1, 1, 1, 2, 2], trace.map { |event| event['step'] }
+    assert_equal 0, trace.last['content_bytes']
+    assert_equal 0, trace.last['tool_count']
+    assert_equal({ 'completion_tokens' => 512 }, trace.last['usage'])
+    refute_includes JSON.generate(trace), 'Internal reasoning'
+    refute_includes JSON.generate(trace), 'Remember blue'
   end
   def test_step_limit_does_not_start_an_unfinishable_tool
     binding = Binding.new({ 'tool_calls' => [call] })

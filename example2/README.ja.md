@@ -124,6 +124,10 @@ Gemma 4 26B A4B・GLM-4.7 Flashには、推論を無効化するため
 [Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/)の仕様も参照してください。
 自動テストは実際の推論を呼びません。
 
+Workerのvarsで`PONDRO_DIAGNOSTIC`に空でない値（例: `"PONDRO_DIAGNOSTIC": "1"`）を
+設定するとagentの推論ステップ・toolの実行ログを表示します。これらは既定では
+表示しません。AIエラーの診断ログは設定に関係なく常に表示します。
+
 AIの失敗はWranglerのターミナルに`PONDRO diagnostic` / `example2.ai_error`として
 記録します。デプロイ先では`npx wrangler tail --config example2/wrangler.jsonc`で確認できます。
 ルーム・AIのID、モデル、プロバイダのエラー、ストリームのフレーム数・最後のフィールド名、

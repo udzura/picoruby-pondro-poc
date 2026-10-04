@@ -90,15 +90,16 @@ class AIChatRoom < Example2::Object
   state :sequence, default: 0
   rpc :history
 
-  tool :remember, description: 'Remember a short key and value in this room for this AI', parameters: {
+  tool :remember, openai_compat: true, description: 'Remember a short key and value in this room for this AI', parameters: {
     'type' => 'object', 'properties' => { 'key' => { 'type' => 'string' }, 'value' => { 'type' => 'string' } },
     'required' => ['key', 'value'], 'additionalProperties' => false
   }
-  tool :recall, description: 'Read a remembered value by key in this room for this AI', parameters: {
+  tool :recall, openai_compat: true, description: 'Read a remembered value by key in this room for this AI', parameters: {
     'type' => 'object', 'properties' => { 'key' => { 'type' => 'string' } },
     'required' => ['key'], 'additionalProperties' => false
   }
-  tool :japan_weather, description: 'Fetch current daily forecasts for Japan from Open-Meteo JMA. Prefer a romanized city name; specify the Japanese prefecture to disambiguate.', parameters: {
+  tool :japan_weather, openai_compat: true,
+    description: 'Fetch current daily forecasts for Japan from Open-Meteo JMA. Prefer a romanized city name; specify the Japanese prefecture to disambiguate.', parameters: {
     'type' => 'object', 'properties' => {
       'location' => { 'type' => 'string', 'description' => 'City name, e.g. Fukuoka or Tokyo' },
       'prefecture' => { 'type' => 'string', 'description' => 'Japanese prefecture name, e.g. 福岡県 or 東京都' },
@@ -222,7 +223,7 @@ class AIChatRoom < Example2::Object
     begin
       broadcast_now({ 'type' => 'ai_start', 'entry' => entry })
       profile = AIParticipant[participant['id']].profile.await
-      input = { 'messages' => conversation(profile), 'max_tokens' => 512 }
+      input = { 'messages' => conversation(profile), 'max_tokens' => 512*4 }
       if ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'].include?(profile['model'])
         input['chat_template_kwargs'] = { 'enable_thinking' => false }
       end
@@ -233,8 +234,18 @@ class AIChatRoom < Example2::Object
       end
       if profile['bot_type'] == 'agent'
         @agent_id = profile['id']
+        trace = lambda do |details|
+          diagnostics['agent'] = details
+          begin
+            Pondro::Future.new({ 'kind' => 'log', 'level' => 'info', 'details' => details.merge({
+              'event' => 'example2.agent.' + details['event'], 'ai_id' => profile['id'], 'model' => profile['model']
+            }) }).await
+          rescue StandardError
+            # Logging must not interrupt tool execution or inference.
+          end
+        end
         result = run!(bindings.AI, profile['model'], input: input['messages'], max_steps: 8,
-                      options: input.reject { |key, _| key == 'messages' }, &emit)
+                      options: input.reject { |key, _| key == 'messages' }, trace: trace, &emit)
         entry['text'] = result['text']
       else
         stream = bindings.AI.stream!(:generate, profile['model'], input)

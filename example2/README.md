@@ -131,6 +131,10 @@ and model documentation for [Llama 3.1 8B](https://developers.cloudflare.com/wor
 [Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/).
 Automated tests never run real inference.
 
+Set `PONDRO_DIAGNOSTIC` to a nonempty value in Worker vars (for example,
+`"PONDRO_DIAGNOSTIC": "1"`) to enable agent step/tool logs. These informational
+logs are disabled by default. AI failure diagnostics are always logged.
+
 AI failures write a `PONDRO diagnostic` / `example2.ai_error` record to the
 Wrangler terminal, or deployed Worker logs (`npx wrangler tail --config
 example2/wrangler.jsonc`). It includes the room and AI IDs, model, provider error,

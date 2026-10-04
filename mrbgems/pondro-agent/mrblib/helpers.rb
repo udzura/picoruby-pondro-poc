@@ -12,8 +12,8 @@ module Pondro
       def self.normalize(value)
         raise Error, 'Invalid AI response' unless value.is_a?(Hash)
         raise Error, 'AI provider error: ' + JSON.generate(value['error']) if value['error']
-        message = value['choices'].is_a?(Array) ? value['choices'].first : nil
-        message = message['message'] if message.is_a?(Hash)
+        choice = value['choices'].is_a?(Array) ? value['choices'].first : nil
+        message = choice.is_a?(Hash) ? choice['message'] : nil
         message = value unless message.is_a?(Hash)
         content = message['content'] || message['response'] || ''
         calls = message['tool_calls'] || []
@@ -25,7 +25,15 @@ module Pondro
           raise Error, 'Invalid tool function' unless function.is_a?(Hash)
           { 'id' => call['id'], 'name' => function['name'], 'arguments' => function['arguments'] }
         end
-        { 'content' => content, 'tool_calls' => normalized }
+        reasoning_bytes = ['reasoning', 'reasoning_content'].inject(0) do |bytes, key|
+          bytes + (message[key].is_a?(String) ? message[key].bytesize : 0)
+        end
+        { 'content' => content, 'tool_calls' => normalized, 'diagnostics' => {
+          'response_keys' => value.keys, 'message_keys' => message.keys,
+          'finish_reason' => choice.is_a?(Hash) ? choice['finish_reason'] : value['finish_reason'],
+          'reasoning_bytes' => reasoning_bytes, 'usage' => value['usage'],
+          'status' => value['status'], 'incomplete_details' => value['incomplete_details']
+        } }
       end
 
       def self.append(messages, response, results)

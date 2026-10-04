@@ -72,7 +72,7 @@ export class PondroObject extends DurableObject {
           new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('Remote PONDRO RPC timed out')), 10000); })
         ]);
       } finally { clearTimeout(timer); }
-    }, bindings);
+    }, bindings, { diagnostic: Boolean(env.PONDRO_DIAGNOSTIC) });
     this.websocket = new WebSocketAdapter(ctx, this.host);
     this.host.adapters.push(this.websocket);
   }

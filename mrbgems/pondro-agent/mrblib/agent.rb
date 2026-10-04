@@ -15,11 +15,14 @@ module Pondro
     end
 
     module ClassMethods
-      def tool(name, description:, parameters:)
+      def tool(name, description:, parameters:, openai_compat: false)
         Schema.check(parameters)
         raise ArgumentError, 'Tool parameters must be an object' unless parameters['type'] == 'object'
+        raise ArgumentError, 'openai_compat must be boolean' unless openai_compat == true || openai_compat == false
         @tools ||= {}
-        @tools[name.to_s] = { 'name' => name.to_s, 'description' => description, 'parameters' => parameters }
+        definition = { 'name' => name.to_s, 'description' => description, 'parameters' => parameters }
+        definition['openai_compat'] = true if openai_compat
+        @tools[name.to_s] = definition
       end
 
       def tools
@@ -77,21 +80,36 @@ module Pondro
 
     # Input may be text or a messages array. The returned transcript is owned by
     # the caller; persistence and memory policy remain ordinary application state.
-    def run!(binding, model, input:, max_steps: 8, helper: WorkersAI, options: {}, &delta)
+    def run!(binding, model, input:, max_steps: 8, helper: WorkersAI, options: {}, trace: nil, &delta)
       raise ArgumentError, 'max_steps must be a positive integer' unless max_steps.is_a?(Integer) && max_steps > 0
       messages = input.is_a?(String) ? [{ 'role' => 'user', 'content' => input }] : input
       raise ArgumentError, 'input must be text or a messages array' unless messages.is_a?(Array)
       messages = JSON.parse(JSON.generate(messages))
       definitions = self.class.tools
+      tools = definitions.values.map do |definition|
+        if definition['openai_compat']
+          { 'type' => 'function', 'function' => definition.reject { |key, _| key == 'openai_compat' } }
+        else
+          definition
+        end
+      end
       max_steps.times do |step|
-        request = options.merge({ 'messages' => messages, 'tools' => definitions.values })
+        request = options.merge({ 'messages' => messages, 'tools' => tools })
         raise Error, 'Agent input exceeded 256 KiB' if JSON.generate(request).bytesize > 262_144
+        trace.call({ 'event' => 'model_start', 'step' => step + 1, 'message_count' => messages.length,
+                     'tool_count' => tools.length, 'max_tokens' => request['max_tokens'] }) if trace
         response = helper.complete(binding, model, request, &delta)
         calls = response['tool_calls'] || []
         text = response['content'] || ''
         raise Error, 'Invalid agent response' unless text.is_a?(String) && calls.is_a?(Array)
+        detail = response['diagnostics'] || {}
+        trace.call(detail.merge({ 'event' => 'model_response', 'step' => step + 1,
+                                  'content_bytes' => text.bytesize, 'tool_count' => calls.length })) if trace
         if calls.empty?
-          raise Error, 'AI returned an empty reply' if text.empty?
+          if text.empty?
+            raise Error, 'AI returned an empty reply (finish_reason=' + (detail['finish_reason'] || 'unknown').to_s +
+                         ', reasoning_bytes=' + (detail['reasoning_bytes'] || 0).to_s + ')'
+          end
           messages << { 'role' => 'assistant', 'content' => text }
           return { 'text' => text, 'messages' => messages, 'steps' => step + 1 }
         end
@@ -108,9 +126,12 @@ module Pondro
           [call, arguments]
         end
         results = prepared.map do |call, arguments|
+          trace.call({ 'event' => 'tool_start', 'step' => step + 1, 'tool' => call['name'] }) if trace
           value = send(call['name'], arguments)
           content = JSON.generate(value)
           raise Error, 'Tool result exceeded 64 KiB' if content.bytesize > 65_536
+          trace.call({ 'event' => 'tool_result', 'step' => step + 1, 'tool' => call['name'],
+                       'result_bytes' => content.bytesize, 'status' => value.is_a?(Hash) ? value['status'] : nil }) if trace
           { 'call' => call, 'content' => content }
         end
         helper.append(messages, response, results)

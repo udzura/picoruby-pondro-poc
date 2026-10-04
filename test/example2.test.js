@@ -16,7 +16,7 @@ function source(text) {
   } });
 }
 
-function world(ai, fetcher) {
+function world(ai, fetcher, diagnostic = false) {
   const snapshots = new Map();
   const hosts = new Map();
   function get(klass, id) {
@@ -30,7 +30,7 @@ function world(ai, fetcher) {
       const profile = { context: () => ({ object_registry: 'default' }), handles: () => false };
       const runtime = new RubyRuntime(module);
       const host = new PondroHost(ctx, runtime, [binding, profile], (request, chain) =>
-        get(request.class, request.id).dispatch('rpc', { method: request.method, args: request.args }, chain), binding);
+        get(request.class, request.id).dispatch('rpc', { method: request.method, args: request.args }, chain), binding, { diagnostic });
       host.adapters.push(new WebSocketAdapter(ctx, host));
       hosts.set(key, { runtime, sockets, host, dispatch: (type, payload, chain) => host.dispatch({ class: klass, id }, type, payload, chain) });
     }
@@ -207,7 +207,7 @@ test('Gemma and GLM disable thinking while Llama retains its default input', asy
       calls++;
       assert.equal(selectedModel, model);
       assert.equal(input.stream, true);
-      assert.equal(input.max_tokens, 512);
+      assert.equal(input.max_tokens, 2048);
       assert.deepEqual(input.chat_template_kwargs, model.includes('/llama-') ? undefined : { enable_thinking: false });
       return source(frame('Hello') + 'data: [DONE]\n\n');
     } });
@@ -230,7 +230,7 @@ test('empty reasoning-only replies log model, finish reason and usage without co
     return source('data: {"choices":[{"delta":{"reasoning_content":"private reasoning"}}]}\n\n' +
       'data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens":512}}\n\n' +
       'data: [DONE]\n\n');
-  } });
+  } }, undefined, true);
   try {
     await w.get('AIParticipant', 'thinker').dispatch('http.rpc', { method: 'configure',
       args: ['Thinker', 'Secret persona', '@cf/zai-org/glm-4.7-flash'] });
@@ -254,7 +254,7 @@ test('AI stream provider errors retain message and code in chat and server diagn
   t.mock.method(console, 'error', (...args) => logs.push(args));
   const w = world({ async run() {
     return source('data: {"error":{"message":"Model unavailable","code":1234}}\n\n');
-  } });
+  } }, undefined, true);
   try {
     await w.configure('helper', 'Helper', 'Be kind.');
     const human = await w.connect('provider-errors', 'Human');
@@ -394,13 +394,14 @@ test('agent rejects unknown and invalid tools before execution and can handle th
 
 test('agent weather tool fetches Japanese geocoding and JMA forecasts through real Wasm', async (t) => {
   t.mock.method(console, 'error', () => {});
+  const logs = t.mock.method(console, 'info', () => {});
   const requests = [];
   let mode = 'ok';
   let args = { location: '福岡市 & city', prefecture: '福岡県', days: 2 };
   let result;
   const place = { name: '福岡市', admin1: '福岡県', country_code: 'JP', latitude: 33.6, longitude: 130.41667 };
   const w = world({ async run(model, input) {
-    assert.ok(input.tools.some(tool => tool.name === 'japan_weather'));
+    assert.ok(input.tools.some(tool => tool.type === 'function' && tool.function.name === 'japan_weather'));
     assert.match(input.messages[0].content, /always call japan_weather/);
     if (input.messages.at(-1).role === 'tool') {
       result = JSON.parse(input.messages.at(-1).content);
@@ -428,7 +429,7 @@ test('agent weather tool fetches Japanese geocoding and JMA forecasts through re
       time: ['2026-10-04', '2026-10-05'], weather_code: [0, 61],
       temperature_2m_max: [25.5, 23], temperature_2m_min: [18, null], precipitation_sum: [0, 4.2]
     } });
-  });
+  }, true);
   try {
     await w.get('AIParticipant', 'weather').dispatch('http.rpc', {
       method: 'configure', args: ['Weather', 'Be helpful.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent']
@@ -438,6 +439,13 @@ test('agent weather tool fetches Japanese geocoding and JMA forecasts through re
     const ask = () => human.dispatch({ type: 'say', text: '福岡市の天気を教えて' });
     await ask();
     assert.equal(requests[0].searchParams.get('name'), args.location);
+    assert.deepEqual(logs.mock.calls.map(call => call.arguments[1].event), [
+      'example2.agent.model_start', 'example2.agent.model_response', 'example2.agent.tool_start',
+      'example2.agent.tool_result', 'example2.agent.model_start', 'example2.agent.model_response'
+    ]);
+    assert.equal(logs.mock.calls[3].arguments[1].status, 'ok');
+    assert.equal(logs.mock.calls[5].arguments[1].ai_id, 'weather');
+    assert.equal(logs.mock.calls[5].arguments[1].content_bytes > 0, true);
     assert.equal(result.status, 'ok');
     assert.equal(result.location.prefecture, '福岡県');
     assert.equal(result.forecast[1].temperature_2m_min, null);

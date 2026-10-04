@@ -35,6 +35,20 @@ export RPC or HTTP methods. Definitions are inherited; a subclass may redefine a
 tool. There is no `memory` or `agent_model` DSL. Memory policy and persistence use
 ordinary `state` declarations and application methods.
 
+Add `openai_compat: true` to a `tool` declaration to send that tool as
+`{ "type": "function", "function": { "name": ..., "description": ..., "parameters": ... } }`.
+The default is `false`, which sends the native Workers AI declaration. Each tool
+chooses its own format; both formats may occur in one request if the provider
+supports them. The flag is local configuration and is not sent to the model.
+Ruby method dispatch and argument validation remain the same.
+
+```ruby
+tool :weather, openai_compat: true, description: 'Get weather', parameters: {
+  'type' => 'object', 'properties' => { 'city' => { 'type' => 'string' } },
+  'required' => ['city'], 'additionalProperties' => false
+}
+```
+
 `input:` accepts text or a messages array, which is copied before use. `options:`
 is forwarded to the model; messages and registered tools are owned by the loop.
 The result contains `text` (the final response), `messages` (the complete run
@@ -67,7 +81,8 @@ provider's tool-result message format:
 
 The default `Pondro::Agent::WorkersAI` uses `binding.run` with `stream: false`.
 It reads Workers AI JSON responses and OpenAI-shaped `choices[].message`, and
-preserves call IDs when present. Tools use Workers AI's native declarations.
+preserves call IDs when present. Tools use Workers AI's native declarations by
+default, or OpenAI-compatible declarations when `openai_compat: true` is set.
 See the [traditional function-calling API](https://developers.cloudflare.com/workers-ai/features/function-calling/traditional/).
 Model support for tools and follow-up messages must be checked for the selected
 model; this harness does not infer capabilities from model names.
@@ -83,6 +98,16 @@ tool definitions and messages to another provider's format.
 
 The optional block receives text deltas from every round, including intermediate
 assistant text. The returned `text` is only the final round's text.
+
+`trace: ->(event) { ... }` receives `model_start`, `model_response`, `tool_start`,
+and `tool_result` events with the step number. The JSON helper reports response
+keys, message keys, finish reason, reasoning byte count and usage in its response
+event. Events omit message text, reasoning text, tool arguments and result text.
+Custom helpers may return a `diagnostics` Hash with their own response metadata.
+The callback runs synchronously and may raise; handle logging failures inside it.
+When `env.PONDRO_DIAGNOSTIC` is set to a nonempty value, Example 2 logs these
+events as `example2.agent.*`, including AI ID and model. These informational
+logs are disabled by default; AI error diagnostics are always logged.
 
 ## Event lifetime
 
