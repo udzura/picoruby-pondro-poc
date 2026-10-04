@@ -27,6 +27,8 @@ UIにもmockと表示します。
 
 1. Room IDと自分の表示名を入力して接続します。
 2. AI ID、表示名、性格を指定して**Load or create AI**を押します。
+   作成済みのAIはリストから選ぶだけで、保存済みの名前と性格を読み込めます。
+   別の画面で作成したAIは「一覧を更新」で取得できます。
 3. **Invite AI to this room**で招待し、発言します。
 4. 同じRoomを別タブで開くと、他の人間として参加できます。
 5. 別Roomで同じAI IDを読み込んで招待すると、そのAIが両方へ参加します。
@@ -57,6 +59,7 @@ Worker・DOがローカルでもWorkers AIを使い、利用量に加算され�
 
 | Object | 責務 |
 | --- | --- |
+| `AICatalog['default']` | 作成済みAIのIDと表示名の永続一覧 |
 | `AIParticipant[ai_id]` | 永続化する表示名、初期性格、参加Room ID一覧 |
 | `AIChatRoom[room_id]` | 永続化する参加AI一覧、会話履歴、WebSocket配信 |
 
@@ -64,6 +67,10 @@ Worker・DOがローカルでもWorkers AIを使い、利用量に加算され�
 省略可能な`mrbgems/pondro-example2` mgemへまとめ、core APIは変更していません。
 Roomが内部RPCでAIのprofileを読み、自分の履歴で推論します。共通AIのqueueを応答中
 ずっと占有しないため、別Roomは同時に応答できます。性格を共有し、履歴は混ぜません。
+AIの作成時にcatalogへ登録し、`load`でも登録を補完します。一覧機能導入前のAIは、
+既知のIDで一度読み込むと一覧に追加されます。catalogとAIの保存は分散transactionではありません。
+POST `/api/AICatalog/default`の`{"method":"list"}`でIDと名前の一覧を取得できます。
+`AIParticipant`の`load`はprofileを返し、未作成のAIには`null`を返します。
 
 ```ruby
 profile = AIParticipant[ai_id].profile.await

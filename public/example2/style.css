@@ -12,6 +12,8 @@ h1 { font-size: clamp(30px, 4vw, 44px); letter-spacing: -.045em; margin: 0; font
 .header-tools { display: grid; gap: 12px; justify-items: end; flex-shrink: 0; }
 .language-control { display: flex; align-items: center; gap: 10px; }
 select { font: inherit; color: inherit; background: #fffefa; border: 1px solid #c8d4c8; border-radius: 8px; padding: 7px 10px; }
+fieldset select { min-width: 0; width: 100%; }
+fieldset:disabled select { background: #f3f4ef; color: #6e776e; }
 .workspace { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 24px; align-items: start; }
 .card { background: #fffefa; border: 1px solid #dedfd4; border-radius: 18px; padding: 24px; }
 aside { display: grid; gap: 18px; }

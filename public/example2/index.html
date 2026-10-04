@@ -31,6 +31,9 @@
           <p class="step" data-i18n="personalityStep">02 / Give AI a personality</p>
           <form id="ai-form">
             <fieldset id="ai-settings" disabled>
+              <label><span data-i18n="existingAI">Saved AI</span><select id="existing-ai" disabled><option value="" data-i18n="chooseAI">Choose an AI…</option></select></label>
+              <button type="button" id="refresh-ai" class="secondary" data-i18n="refreshAI">Refresh list</button>
+              <p id="catalog-info" class="hint" role="status"></p>
               <label><span data-i18n="aiId">AI ID</span><input id="ai-id" value="sage" maxlength="128" required></label>
               <label><span data-i18n="aiName">AI name</span><input id="ai-name" value="Sage" maxlength="40" required></label>
               <label><span data-i18n="personality">Personality prompt</span><textarea id="personality" rows="5" maxlength="4096" required>You are a thoughtful, friendly companion. Give concise answers, ask curious questions, and reply in the language used by the people in the room.</textarea></label>

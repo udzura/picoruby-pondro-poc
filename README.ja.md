@@ -211,7 +211,7 @@ chainの長さは最大16オブジェクトに制限しています。リモー�
 これにより、別々に開始した呼び出しがbusyなオブジェクト間で互いを待つ場合も、
 待機時間を制限します。timeoutはリモート操作をキャンセルしません。操作が後から完了し、
 リモートのstateを変更する可能性があります。
-デモのJS resolverはCounter、ChatRoom、BindingProbe、StreamProbe、GenericProbe、AIParticipant、AIChatRoomに対応しています。Rubyクラスを追加する場合は、
+デモのJS resolverはCounter、ChatRoom、BindingProbe、StreamProbe、GenericProbe、AICatalog、AIParticipant、AIChatRoomに対応しています。Rubyクラスを追加する場合は、
 JS側のルーティングとresolverにも追加する必要があります。
 
 JS adapterはCloudflareのhibernation API（`acceptWebSocket`、`getWebSockets`、

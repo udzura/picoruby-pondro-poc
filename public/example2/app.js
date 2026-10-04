@@ -9,6 +9,7 @@ let socket;
 let self;
 let loadedAI;
 let loadingAI = false;
+let loadingCatalog = false;
 
 function connected() { return socket?.readyState === WebSocket.OPEN; }
 function controls() {
@@ -21,7 +22,9 @@ function controls() {
   $('send').disabled = !open || active.size > 0;
   $('ai-settings').disabled = !admin;
   $('invite').disabled = !admin || !open || !loadedAI || active.size > 0 || loadingAI;
-  $('create-ai').disabled = !admin || loadingAI;
+  $('create-ai').disabled = !admin || loadingAI || loadingCatalog;
+  $('refresh-ai').disabled = !admin || loadingAI || loadingCatalog;
+  $('existing-ai').disabled = !admin || loadingAI || loadingCatalog || $('existing-ai').options.length <= 1;
   for (const button of $('participants').querySelectorAll('button')) button.disabled = !open || active.size > 0;
 }
 
@@ -157,30 +160,50 @@ $('connect-form').addEventListener('submit', event => {
 });
 $('disconnect').addEventListener('click', () => socket?.close(1000, 'Leaving room'));
 
-async function rpc(id, method, args = []) {
-  const response = await fetch(`/api/AIParticipant/${encodeURIComponent(id)}`, {
+async function rpc(id, method, args = [], klass = 'AIParticipant') {
+  const response = await fetch(`/api/${klass}/${encodeURIComponent(id)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ method, args })
   });
   if (!response.ok) throw new Error(await response.text());
   return (await response.json()).value;
 }
 
-$('ai-id').addEventListener('input', () => {
-  loadedAI = null; $('ai-name').readOnly = false; $('personality').readOnly = false; controls();
-});
-$('ai-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  if (!admin) return;
-  const id = $('ai-id').value.trim();
+async function refreshCatalog() {
+  if (!admin || loadingCatalog) return;
+  loadingCatalog = true; controls();
+  localize($('catalog-info'), 'loadingCatalog');
+  try {
+    const list = await rpc('default', 'list', [], 'AICatalog');
+    const placeholder = translated('option', '', 'chooseAI');
+    placeholder.value = '';
+    $('existing-ai').replaceChildren(placeholder);
+    for (const ai of list) {
+      const option = element('option', '', `${ai.name} · ${ai.id}`);
+      option.value = ai.id;
+      $('existing-ai').append(option);
+    }
+    $('existing-ai').value = loadedAI?.id || '';
+    localize($('catalog-info'), list.length ? 'catalogCount' : 'emptyCatalog', { count: list.length });
+  } catch (error) { localize($('catalog-info'), 'error', { detail: error.message }); }
+  finally { loadingCatalog = false; controls(); }
+}
+
+async function loadAI(id, create = false) {
+  if (!admin || loadingAI) return;
   const name = $('ai-name').value.trim();
   const prompt = $('personality').value.trim();
-  if (encoder.encode(name).length > 128 || encoder.encode(prompt).length > 4096) { localize($('ai-info'), 'invalidPersona'); return; }
+  if (create && (encoder.encode(name).length > 128 || encoder.encode(prompt).length > 4096)) {
+    localize($('ai-info'), 'invalidPersona'); return;
+  }
+  loadedAI = null;
   loadingAI = true; controls();
+  localize($('ai-info'), 'loadingAI');
   try {
-    let profile = await rpc(id, 'profile');
+    let profile = await rpc(id, 'load');
     const existing = !!profile;
-    if (!profile) profile = (await rpc(id, 'configure', [name, prompt])).profile;
+    if (!profile && create) profile = (await rpc(id, 'configure', [name, prompt])).profile;
     if ($('ai-id').value.trim() !== id) return;
+    if (!profile) { localize($('ai-info'), 'missingAI'); return; }
     loadedAI = profile;
     $('ai-name').value = profile.name; $('personality').value = profile.prompt;
     $('ai-name').readOnly = true; $('personality').readOnly = true;
@@ -188,8 +211,24 @@ $('ai-form').addEventListener('submit', async event => {
     $('ai-info').append(translated('span', '', existing ? 'loaded' : 'saved'), ' ',
       translated('span', '', profile.rooms.length ? 'rooms' : 'readyToJoin', { rooms: profile.rooms.join(', ') }), ' ',
       translated('span', '', 'reuse'));
+    await refreshCatalog();
   } catch (error) { localize($('ai-info'), 'error', { detail: error.message }); }
   finally { loadingAI = false; controls(); }
+}
+
+$('ai-id').addEventListener('input', () => {
+  loadedAI = null; $('existing-ai').value = ''; $('ai-name').readOnly = false; $('personality').readOnly = false; controls();
+});
+$('refresh-ai').addEventListener('click', refreshCatalog);
+$('existing-ai').addEventListener('change', () => {
+  const id = $('existing-ai').value;
+  if (!admin || !id) return;
+  $('ai-id').value = id;
+  loadAI(id);
+});
+$('ai-form').addEventListener('submit', event => {
+  event.preventDefault();
+  loadAI($('ai-id').value.trim(), true);
 });
 $('invite').addEventListener('click', () => {
   if (admin && connected() && loadedAI && !active.size && !loadingAI) socket.send(JSON.stringify({ type: 'invite', ai_id: loadedAI.id }));
@@ -214,3 +253,4 @@ if (!admin) {
 $('language').addEventListener('change', event => setLanguage(event.target.value));
 applyLanguage();
 controls();
+if (admin) refreshCatalog();

@@ -1,24 +1,47 @@
+class AICatalog < Pondro::Object
+  state :entries, default: {}
+  rpc :list, http: true
+  rpc :register
+
+  def list
+    entries.values
+  end
+
+  def register(ai_id, display_name)
+    entries[ai_id] = { 'id' => ai_id, 'name' => display_name }
+    nil
+  end
+end
+
 class AIParticipant < Pondro::Object
   MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8'
   state :name, default: nil
   state :prompt, default: nil
   state :rooms, default: []
-  rpc :configure, :profile, http: true
+  rpc :configure, :profile, :load, http: true
   rpc :join, :leave
 
   # The first configuration wins. Reusing an AI ID loads its original persona.
   def configure(display_name, personality)
-    return { 'created' => false, 'profile' => profile } if prompt
+    return { 'created' => false, 'profile' => load } if prompt
     validate_text(display_name, 128, 'AI name')
     validate_text(personality, 4096, 'Personality prompt')
     self.name = display_name
     self.prompt = personality
+    AICatalog['default'].register(id, name).await
     { 'created' => true, 'profile' => profile }
   end
 
   def profile
     return nil unless prompt
     { 'id' => id, 'name' => name, 'prompt' => prompt, 'model' => MODEL, 'rooms' => rooms }
+  end
+
+  # Loading also indexes personas created before the catalog was introduced.
+  def load
+    return nil unless prompt
+    AICatalog['default'].register(id, name).await
+    profile
   end
 
   def join(room_id)
@@ -198,5 +221,6 @@ class AIChatRoom < Pondro::Object
   end
 end
 
+Pondro.register('AICatalog', AICatalog)
 Pondro.register('AIParticipant', AIParticipant)
 Pondro.register('AIChatRoom', AIChatRoom)

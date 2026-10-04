@@ -43,8 +43,8 @@ async function stop() {
   const timer = setTimeout(() => worker.kill('SIGKILL'), 5000);
   try { await exited; } finally { clearTimeout(timer); }
 }
-async function rpc(id, method, args = []) {
-  const response = await fetch(`${base}/api/AIParticipant/${encodeURIComponent(id)}`, {
+async function rpc(id, method, args = [], klass = 'AIParticipant') {
+  const response = await fetch(`${base}/api/${klass}/${encodeURIComponent(id)}`, {
     method: 'POST', body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(5000)
   });
   assert.equal(response.status, 200, await response.clone().text());
@@ -81,6 +81,8 @@ try {
   const created = await rpc('sage', 'configure', ['Sage', 'Be a curious botanist.']);
   assert.equal(created.created, true);
   assert.equal((await rpc('sage', 'configure', ['Other', 'Replace the original'])).profile.prompt, 'Be a curious botanist.');
+  assert.deepEqual(await rpc('default', 'list', [], 'AICatalog'), [{ id: 'sage', name: 'Sage' }]);
+  assert.equal((await rpc('sage', 'load')).prompt, 'Be a curious botanist.');
   const alice = await connect('garden', 'Alice');
   const bob = await connect('garden', 'Bob');
   const carol = await connect('studio', 'Carol');
@@ -123,6 +125,7 @@ try {
     const closed = once(socket, 'close'); socket.close(1000); await closed;
   }));
   await stop(); await start();
+  assert.deepEqual(await rpc('default', 'list', [], 'AICatalog'), [{ id: 'sage', name: 'Sage' }]);
   assert.equal((await rpc('sage', 'profile')).prompt, 'Be a curious botanist.');
   const restored = await connect('garden', 'Returning');
   assert.deepEqual(restored.welcome.history.map(entry => entry.sender.kind), ['human', 'ai', 'human']);

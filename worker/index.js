@@ -7,7 +7,7 @@ import { BindingAdapter } from './adapters/bindings.js';
 import { createMockAI } from '../example2/mock-ai.js';
 
 const MAX_BODY_BYTES = 8192;
-const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AIParticipant', 'AIChatRoom'];
+const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AICatalog', 'AIParticipant', 'AIChatRoom'];
 
 function route(url) {
   const match = url.pathname.match(/^\/(api|ws)\/([^/]+)\/([^/]+)$/);

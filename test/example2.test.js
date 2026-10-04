@@ -56,6 +56,29 @@ function world(ai) {
   };
 }
 
+test('AI catalog persists creations, loads saved personas and indexes legacy AI without duplicates', async () => {
+  const w = world({ async run() { throw new Error('Listing must not trigger inference'); } });
+  const catalog = () => w.get('AICatalog', 'default').dispatch('http.rpc', { method: 'list' });
+  try {
+    assert.deepEqual(await catalog(), []);
+    assert.equal(await w.get('AIParticipant', 'missing').dispatch('http.rpc', { method: 'load' }), null);
+    await assert.rejects(w.configure('invalid', '', 'Prompt'), /AI name/);
+    assert.deepEqual(await catalog(), []);
+    await w.configure('sage', 'Sage', 'Original prompt.');
+    await w.configure('sage', 'Other', 'Replace prompt.');
+    await w.configure('helper', '助っ人🌿', 'Be kind.');
+    assert.deepEqual(await catalog(), [{ id: 'sage', name: 'Sage' }, { id: 'helper', name: '助っ人🌿' }]);
+    w.snapshots.set('AIParticipant:legacy', { class: 'AIParticipant', id: 'legacy', state: { name: 'Legacy', prompt: 'Saved before catalog.', rooms: ['old-room'] } });
+    const profile = await w.get('AIParticipant', 'legacy').dispatch('http.rpc', { method: 'load' });
+    assert.equal(profile.prompt, 'Saved before catalog.');
+    assert.deepEqual(profile.rooms, ['old-room']);
+    await w.get('AIParticipant', 'legacy').dispatch('http.rpc', { method: 'load' });
+    w.restore('AICatalog', 'default');
+    assert.deepEqual((await catalog()).map(ai => ai.id), ['sage', 'helper', 'legacy']);
+    await assert.rejects(w.get('AICatalog', 'default').dispatch('http.rpc', { method: 'register', args: ['fake', 'Fake'] }), /HTTP/);
+  } finally { w.destroy(); }
+});
+
 test('one durable AI persona joins multiple independent rooms and streams to every human', { timeout: 5000 }, async () => {
   let controller;
   const inputs = [];

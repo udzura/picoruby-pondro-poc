@@ -28,6 +28,8 @@ participant removal are unchanged.
 
 1. Enter a Room ID and your name, then connect.
 2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.
+   Select a saved AI from the list to load its original name and personality.
+   Use **Refresh list** to see AI created in another browser.
 3. Click **Invite AI to this room**, then send a message.
 4. Open another tab in the same room to join as another human.
 5. Join a different room, load the same AI ID, and invite it there too.
@@ -60,6 +62,7 @@ Automated tests never run real inference.
 
 | Object | Responsibility |
 | --- | --- |
+| `AICatalog['default']` | Durable list of created AI IDs and display names |
 | `AIParticipant[ai_id]` | Durable name, initial personality, joined Room IDs |
 | `AIChatRoom[room_id]` | Durable AI roster, history, WebSocket broadcasts |
 
@@ -69,6 +72,11 @@ Pondro core APIs are unchanged. The Room reads an AI profile through internal
 RPC, then performs inference with its own history. Keeping inference in the
 Room avoids holding the shared AI's event queue throughout generation, allowing
 different rooms to respond concurrently without mixing conversations.
+Creation registers each AI in the catalog; `load` also repairs its registration.
+For AI created before the catalog existed, load the known ID once to index it.
+Catalog and AI persistence are not a distributed transaction.
+POST `/api/AICatalog/default` with `{"method":"list"}` returns the ID/name list.
+`AIParticipant.load` returns the saved profile or `null` for unconfigured AI.
 
 ```ruby
 profile = AIParticipant[ai_id].profile.await

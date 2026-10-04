@@ -203,7 +203,7 @@ or exactly-once guarantees. Call chains reject self-calls and cycles within
 the propagated chain and are limited to 16 objects. Remote calls have a
 10-second timeout, also bounding independently initiated wait cycles between
 busy objects. Timeout does not cancel a remote operation: it may still complete
-and change remote state. The demo's JS resolver supports Counter, ChatRoom, BindingProbe, StreamProbe, GenericProbe, AIParticipant and AIChatRoom;
+and change remote state. The demo's JS resolver supports Counter, ChatRoom, BindingProbe, StreamProbe, GenericProbe, AICatalog, AIParticipant and AIChatRoom;
 adding another Ruby class also requires adding it to the JS routing/resolver.
 
 The JS adapter uses Cloudflare's hibernation API (`acceptWebSocket`,
