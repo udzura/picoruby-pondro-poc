@@ -12,6 +12,7 @@
     "test:ruby": "ruby test/core_test.rb && ruby test/future_test.rb && ruby test/agent_test.rb",
     "test:e2e": "node test/e2e.mjs",
     "test:example2:e2e": "node test/example2-e2e.mjs",
+    "test:fetch:e2e": "node test/fetch-e2e.mjs",
     "sync:bridge": "ruby scripts/sync_bridge.rb"
   },
   "devDependencies": {

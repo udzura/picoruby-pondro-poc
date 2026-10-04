@@ -1,4 +1,4 @@
-import { createCloudflareBindings } from '../upstream/runtime.js';
+import { createCloudflareBindings, createFetchBindings } from '../upstream/runtime.js';
 import { ReadStreams } from './read-streams.js';
 import { encodeHostCall, decodeHostResult, HostResultKind } from '../upstream/host-bridge.js';
 
@@ -9,8 +9,9 @@ const operations = { 'kv.get': 'kv', 'kv.put': 'kv', 'd1.execute': 'd1', 'r2.get
 // The shared dispatcher owns validation and PHC1/PHB1 encoding. This adapter
 // only connects its byte frames to Pondro's event-local JSON/Future ABI.
 export class BindingAdapter {
-  constructor(env, types) {
+  constructor(env, types, { fetcher = request => globalThis.fetch(request) } = {}) {
     this.env = env;
+    this.fetcher = fetcher;
     this.streams = new ReadStreams();
     this.types = Object.freeze({ ...types });
     this.hostTypes = Object.fromEntries(Object.entries(this.types).filter(([, type]) => type !== 'generic'));
@@ -42,8 +43,39 @@ export class BindingAdapter {
 
   async finishEvent() { await this.streams.finishEvent(); }
 
+  async invokeFetch(request) {
+    if (request.binding !== '' || !Array.isArray(request.args) || request.args.length !== 2 ||
+        request.args.some(arg => typeof arg !== 'string')) {
+      throw new Error('Invalid fetch arguments');
+    }
+    let captured;
+    try {
+      const fetcher = request.operation === 'fetch' ? this.fetcher : async input => {
+        const response = await this.fetcher(input);
+        // Let upstream reject and cancel redirects. Otherwise keep the real body
+        // unread and pass its metadata through the unchanged fetch validator.
+        if (response.status >= 300 && response.status < 400) return response;
+        captured = response.body;
+        return { status: response.status, headers: response.headers, body: null };
+      };
+      const bridge = createFetchBindings(fetcher).picorbWorkerFetchBridge;
+      const result = decodeHostResult(await bridge(...request.args));
+      if (result.kind !== HostResultKind.ok) throw new Error(decoder.decode(result.payload));
+      const response = JSON.parse(decoder.decode(result.payload));
+      if (request.operation === 'fetch') return response;
+      const source = captured || new ReadableStream({ start(controller) { controller.close(); } });
+      const registered = this.streams.register(source);
+      captured = null; // The event-local stream registry now owns cancellation.
+      return { status: response.status, headers: response.headers,
+        stream_id: new DataView(registered.payload.buffer).getUint32(0, true) };
+    } finally {
+      if (captured) await captured.cancel().catch(() => {});
+    }
+  }
+
   async invoke(request) {
     if (typeof request.operation !== 'string') throw new Error('Invalid binding operation');
+    if (request.operation === 'fetch' || request.operation === 'fetch.stream') return this.invokeFetch(request);
     if (request.operation.startsWith('stream.')) {
       if (request.binding !== '' || !['stream.read_partial', 'stream.readline', 'stream.read_all', 'stream.close'].includes(request.operation)) {
         throw new Error('Unsupported stream operation');

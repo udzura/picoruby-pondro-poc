@@ -347,6 +347,48 @@ production KV consistency may return a previous value after a write.
 A shared upstream mgem extraction remains future work; the dependency is currently
 a reproducible JS snapshot. Readable streams are owned by the current event.
 
+## HTTP fetch from Ruby
+
+Objects declaring `use Pondro::Bindings` can issue ordinary HTTP requests without
+registering a resource binding:
+
+```ruby
+response = bindings.fetch('https://example.com/api', method: 'POST',
+                          headers: { 'content-type' => 'application/json' },
+                          body: JSON.generate({ 'query' => 'hello' }))
+response['status']
+response['headers']
+response['body']
+
+stream = bindings.fetch_stream('https://example.com/events')
+stream.metadata # { 'status' => 200, 'headers' => { ... } }; does not read the body
+chunk = stream.read_partial(1024)
+line = stream.readline
+rest = stream.read_all(max_bytes: 65_536)
+stream.close
+```
+
+`fetch` waits for the complete response and returns a Hash with `status`,
+`headers` and a strict UTF-8 `body`, limited to 1 MiB. HTTP 4xx/5xx responses are
+returned normally. The upstream fetch bridge validates the URL and options:
+HTTP/HTTPS absolute URLs without credentials, and `method`, string-valued
+`headers`, and a string `body` are supported. Redirects are rejected, and the
+request has a 10-second timeout. Validation, network and body errors raise
+`Pondro::BindingError`.
+
+`fetch_stream` starts the request immediately and returns the same
+`Pondro::StreamFuture` type as AI `stream!`. `await` and `metadata` wait only for
+headers; reads wait directly and return binary Ruby strings. Reading never
+implicitly decodes UTF-8. Bodyless responses produce an empty stream. Existing
+stream read limits and EOF rules apply; the total response need not fit in 1 MiB
+when consumed with successive `read_partial` calls. The request timeout also
+applies while reading its body. Explicit `close` or event cleanup cancels an
+unread body. Handles cannot be stored across events. A binding named `fetch` or
+`fetch_stream` can still be accessed through `bindings[:name]`.
+
+`npm run test:fetch:e2e` checks real Ruby/Wasm/workerd requests against a temporary
+local HTTP server, including incremental delivery and body cancellation.
+
 ## Generic binding calls
 
 For a binding without a typed Ruby proxy, add its name as `generic` to the

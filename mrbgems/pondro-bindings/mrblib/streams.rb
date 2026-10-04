@@ -4,8 +4,12 @@ module Pondro
 
     # R2 has already opened its body; AI stream! starts an eager open request.
     def initialize(request = nil, id = nil)
+      @metadata = {}
       if request
-        super(request, BindingError) { |value| validate_handle(value.is_a?(Hash) ? value['stream_id'] : nil) }
+        super(request, BindingError) do |value|
+          @metadata = value.reject { |key, _| key == 'stream_id' } if value.is_a?(Hash)
+          validate_handle(value.is_a?(Hash) ? value['stream_id'] : nil)
+        end
       else
         @value = validate_handle(id)
         @settled = true
@@ -18,6 +22,11 @@ module Pondro
     end
 
     alias read await
+
+    def metadata
+      await
+      @metadata
+    end
 
     def read_partial(length)
       consume('read_partial', length)

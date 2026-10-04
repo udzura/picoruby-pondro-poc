@@ -352,6 +352,46 @@ curl -X POST http://localhost:8787/api/BindingProbe/note \
 upstreamとの共通mgem抽出は今後の対象です。現段階では再現可能なJSのsnapshotとして
 依存を取り込み、読み出しstreamは現在のイベントが所有します。
 
+## RubyからのHTTP fetch
+
+`use Pondro::Bindings`したオブジェクトでは、resource bindingの登録なしで通常のHTTP
+リクエストを発行できます。
+
+```ruby
+response = bindings.fetch('https://example.com/api', method: 'POST',
+                          headers: { 'content-type' => 'application/json' },
+                          body: JSON.generate({ 'query' => 'hello' }))
+response['status']
+response['headers']
+response['body']
+
+stream = bindings.fetch_stream('https://example.com/events')
+stream.metadata # { 'status' => 200, 'headers' => { ... } }; 本文は読み出さない
+chunk = stream.read_partial(1024)
+line = stream.readline
+rest = stream.read_all(max_bytes: 65_536)
+stream.close
+```
+
+`fetch`は応答全体を待ち、`status`・`headers`・厳密なUTF-8の`body`を持つHashを返します。
+本文の上限は1 MiBです。HTTP 4xx/5xxも通常の応答として返します。既存のupstream
+fetch bridgeでURLとoptionsを検証します。認証情報を含まないHTTP/HTTPSの絶対URL、
+`method`、文字列の値を持つ`headers`、文字列の`body`に対応します。
+リダイレクトは拒否し、リクエストのtimeoutは10秒です。検証・通信・本文の読み取りの
+失敗は`Pondro::BindingError`になります。
+
+`fetch_stream`はリクエストを即座に開始し、AIの`stream!`と同じ`Pondro::StreamFuture`を
+返します。`await`と`metadata`はヘッダーの到着だけを待ち、本文は消費しません。
+読み出しはバイナリのRuby文字列を直接返し、UTF-8へ自動変換しません。
+本文のない応答は空streamになります。既存streamと同じ読み出し上限・EOF規則を使い、
+`read_partial`を繰り返す場合は応答全体を1 MiBに制限しません。本文を読む間もリクエストの
+timeoutが適用されます。`close`またはイベント終了時の後片付けで読み残した本文を
+キャンセルします。handleはイベントをまたいで保存できません。`fetch`や`fetch_stream`
+という名前のbindingは`bindings[:name]`で参照できます。
+
+`npm run test:fetch:e2e`は一時的なローカルHTTPサーバーに対し、実際のRuby/Wasm/workerdで
+リクエスト・逐次読み出し・本文のキャンセルを検証します。
+
 ## 汎用bindingの呼び出し
 
 Ruby側に専用proxyがないbindingは、`BindingAdapter`へ渡す一覧に

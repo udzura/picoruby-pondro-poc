@@ -90,6 +90,21 @@ class StreamProbe < Pondro::Object
   use Pondro::WebSocket
   rpc :read_object, http: true
   rpc :read_ai, :abandon_read, :abandon_open
+  rpc :fetch_url, :read_url, :abandon_fetch
+
+  def fetch_url(url, options = {})
+    bindings.fetch(url, **options)
+  end
+
+  def read_url(url, mode = 'read_all', limit = 1024 * 1024, options = {})
+    stream = bindings.fetch_stream(url, **options)
+    { 'metadata' => stream.metadata, 'bytes' => consume_stream(stream, mode, limit) }
+  end
+
+  def abandon_fetch(url)
+    bindings.fetch_stream(url)
+    'abandoned'
+  end
 
   def read_object(key, mode = 'read_all', limit = 1024 * 1024)
     object = bindings[:BUCKET].get(key)

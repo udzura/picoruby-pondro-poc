@@ -19,6 +19,20 @@ module Pondro
         @types = types
       end
 
+      def fetch(url, **options)
+        Future.new(fetch_request('fetch', url, options), BindingError).await
+      end
+
+      def fetch_stream(url, **options)
+        StreamFuture.new(fetch_request('fetch.stream', url, options))
+      end
+
+      def fetch_request(operation, url, options)
+        { 'kind' => 'binding', 'operation' => operation, 'binding' => '',
+          'args' => [url, JSON.generate(options)] }
+      end
+      private :fetch_request
+
       def method_missing(name, *args, &block)
         return self[name] if args.empty? && !block && @types.key?(name.to_s)
         super
