@@ -119,6 +119,8 @@ npm run dev:example2
 `wrangler.jsonc` in this directory configures a remote AI binding. Inference uses
 Workers AI even though the Worker and DOs run locally, and counts toward usage.
 The model selected during AI creation is used with streaming and `max_tokens: 512`.
+Gemma 4 26B A4B and GLM-4.7 Flash also receive
+`chat_template_kwargs: { enable_thinking: false }` to disable thinking.
 The `configure` RPC defaults to `@cf/meta/llama-3.1-8b-instruct-fp8` when its model argument is omitted.
 See [binding configuration](https://developers.cloudflare.com/workers-ai/configuration/bindings/)
 and model documentation for [Llama 3.1 8B](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/),
@@ -128,6 +130,15 @@ and model documentation for [Llama 3.1 8B](https://developers.cloudflare.com/wor
 [OpenAI gpt-oss-20b](https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/) and
 [Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/).
 Automated tests never run real inference.
+
+AI failures write a `PONDRO diagnostic` / `example2.ai_error` record to the
+Wrangler terminal, or deployed Worker logs (`npx wrangler tail --config
+example2/wrangler.jsonc`). It includes the room and AI IDs, model, provider error,
+stream frame count, last field names, finish reason, usage, and reasoning byte
+count. Prompt, chat text, and reasoning text are not logged. An empty reply with
+`finish_reason: length` and nonzero `reasoning_bytes` suggests the token budget
+was consumed before the model produced its answer. These diagnostics do not
+change model parameters or retry inference automatically.
 
 ## Design
 

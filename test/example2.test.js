@@ -174,7 +174,8 @@ test('SSE chat parsing handles CRLF, multiline data, metadata and an unterminate
   } finally { w.destroy(); }
 });
 
-test('AI failures preserve human history, release streams and allow the next turn', { timeout: 5000 }, async () => {
+test('AI failures preserve human history, release streams and allow the next turn', { timeout: 5000 }, async (t) => {
+  t.mock.method(console, 'error', () => {});
   let fail = true;
   let cancelled = 0;
   const w = world({ async run() {
@@ -196,6 +197,72 @@ test('AI failures preserve human history, release streams and allow the next tur
     fail = false;
     await human.dispatch({ type: 'say', text: 'Try again.' });
     assert.deepEqual(w.snapshots.get('AIChatRoom:failures').state.messages.map(entry => entry.text), ['Keep this human message.', 'Try again.', 'Recovered']);
+  } finally { w.destroy(); }
+});
+
+test('Gemma and GLM disable thinking while Llama retains its default input', async () => {
+  for (const model of ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash', '@cf/meta/llama-3.1-8b-instruct-fp8']) {
+    let calls = 0;
+    const w = world({ async run(selectedModel, input) {
+      calls++;
+      assert.equal(selectedModel, model);
+      assert.equal(input.stream, true);
+      assert.equal(input.max_tokens, 512);
+      assert.deepEqual(input.chat_template_kwargs, model.includes('/llama-') ? undefined : { enable_thinking: false });
+      return source(frame('Hello') + 'data: [DONE]\n\n');
+    } });
+    try {
+      await w.get('AIParticipant', 'helper').dispatch('http.rpc', { method: 'configure', args: ['Helper', 'Be kind.', model] });
+      const human = await w.connect('models', 'Human');
+      await human.dispatch({ type: 'invite', ai_id: 'helper' });
+      await human.dispatch({ type: 'say', text: 'Hello' });
+      assert.equal(calls, 1);
+      assert.equal(human.events.some(event => event.type === 'message' && event.entry.sender.kind === 'ai' && event.entry.text === 'Hello'), true);
+      assert.equal(human.events.some(event => event.type === 'ai_error'), false);
+    } finally { w.destroy(); }
+  }
+});
+
+test('empty reasoning-only replies log model, finish reason and usage without conversation text', async (t) => {
+  const logs = [];
+  t.mock.method(console, 'error', (...args) => logs.push(args));
+  const w = world({ async run() {
+    return source('data: {"choices":[{"delta":{"reasoning_content":"private reasoning"}}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens":512}}\n\n' +
+      'data: [DONE]\n\n');
+  } });
+  try {
+    await w.get('AIParticipant', 'thinker').dispatch('http.rpc', { method: 'configure',
+      args: ['Thinker', 'Secret persona', '@cf/zai-org/glm-4.7-flash'] });
+    const human = await w.connect('diagnostics', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'thinker' });
+    await human.dispatch({ type: 'say', text: 'Private human message' });
+    assert.match(human.events.find(event => event.type === 'ai_error').text, /finish_reason=length, reasoning_bytes=17/);
+    assert.equal(logs.length, 1);
+    const diagnostic = logs[0][1];
+    assert.equal(diagnostic.model, '@cf/zai-org/glm-4.7-flash');
+    assert.deepEqual(diagnostic.object, { class: 'AIChatRoom', id: 'diagnostics' });
+    assert.equal(diagnostic.stream.frames, 2);
+    assert.equal(diagnostic.stream.usage.completion_tokens, 512);
+    assert.equal(diagnostic.stream.done, true);
+    assert.doesNotMatch(JSON.stringify(logs), /private reasoning|Secret persona|Private human message/);
+  } finally { w.destroy(); }
+});
+
+test('AI stream provider errors retain message and code in chat and server diagnostics', async (t) => {
+  const logs = [];
+  t.mock.method(console, 'error', (...args) => logs.push(args));
+  const w = world({ async run() {
+    return source('data: {"error":{"message":"Model unavailable","code":1234}}\n\n');
+  } });
+  try {
+    await w.configure('helper', 'Helper', 'Be kind.');
+    const human = await w.connect('provider-errors', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'helper' });
+    await human.dispatch({ type: 'say', text: 'Hello' });
+    assert.match(human.events.find(event => event.type === 'ai_error').text, /Model unavailable.*1234/);
+    assert.match(logs[0][1].error, /Model unavailable.*1234/);
+    assert.equal(logs[0][1].stream.frames, 1);
   } finally { w.destroy(); }
 });
 

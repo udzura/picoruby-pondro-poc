@@ -51,6 +51,10 @@ export class PondroHost {
       ...identity, type, payload, state, managed: true,
       context: Object.assign({}, ...this.adapters.map(adapter => adapter.context()))
     }, request => {
+      if (request.kind === 'log') {
+        console.error('PONDRO diagnostic', { ...request.details, object: identity });
+        return null;
+      }
       if (request.kind === 'socket') {
         const adapter = this.adapters.find(candidate => candidate.invokeSocket);
         if (!adapter) throw new Error('WebSocket adapter is unavailable');

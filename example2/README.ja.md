@@ -113,6 +113,8 @@ npm run dev:example2
 Worker・DOがローカルでもWorkers AIを使い、利用量に加算されます。作成時に選んだモデルへ
 streamと`max_tokens: 512`を指定します。RPCの`configure`でモデルを省略した場合は
 `@cf/meta/llama-3.1-8b-instruct-fp8`を使います。
+Gemma 4 26B A4B・GLM-4.7 Flashには、推論を無効化するため
+`chat_template_kwargs: { enable_thinking: false }`も指定します。
 [公式binding設定](https://developers.cloudflare.com/workers-ai/configuration/bindings/)と
 [Llama 3.1 8B](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/)、
 [GLM-4.7 Flash](https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/)、
@@ -121,6 +123,14 @@ streamと`max_tokens: 512`を指定します。RPCの`configure`でモデルを�
 [OpenAI gpt-oss-20b](https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/)、
 [Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/)の仕様も参照してください。
 自動テストは実際の推論を呼びません。
+
+AIの失敗はWranglerのターミナルに`PONDRO diagnostic` / `example2.ai_error`として
+記録します。デプロイ先では`npx wrangler tail --config example2/wrangler.jsonc`で確認できます。
+ルーム・AIのID、モデル、プロバイダのエラー、ストリームのフレーム数・最後のフィールド名、
+終了理由、使用トークン数、推論部分のバイト数を含みます。プロンプト・会話本文・推論本文は
+ログに含めません。空の応答で`finish_reason: length`かつ`reasoning_bytes`が正数なら、
+回答を出す前に推論でトークン上限へ達した可能性があります。
+この診断機能ではモデルのパラメータ変更や推論の自動リトライは行いません。
 
 ## 採用した設計
 

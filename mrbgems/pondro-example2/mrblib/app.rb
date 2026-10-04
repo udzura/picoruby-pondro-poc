@@ -172,20 +172,38 @@ class AIChatRoom < Example2::Object
   def reply(participant)
     entry = entry_for({ 'kind' => 'ai', 'id' => participant['id'], 'name' => participant['name'] }, '')
     stream = nil
+    profile = nil
+    diagnostics = { 'frames' => 0, 'bytes' => 0, 'reasoning_bytes' => 0 }
     begin
       broadcast_now({ 'type' => 'ai_start', 'entry' => entry })
       profile = AIParticipant[participant['id']].profile.await
       input = { 'messages' => conversation(profile), 'max_tokens' => 512 }
+      if ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'].include?(profile['model'])
+        input['chat_template_kwargs'] = { 'enable_thinking' => false }
+      end
       stream = bindings.AI.stream!(:generate, profile['model'], input)
-      Pondro::Example2::SSE.each_delta(stream) do |delta|
+      Pondro::Example2::SSE.each_delta(stream, diagnostics) do |delta|
         raise Pondro::BindingError, 'AI reply exceeded 16 KiB' if entry['text'].bytesize + delta.bytesize > 16_384
         entry['text'] += delta
         broadcast_now({ 'type' => 'ai_delta', 'sequence' => entry['sequence'], 'delta' => delta })
       end
-      raise Pondro::BindingError, 'AI returned an empty reply' if entry['text'].empty?
+      if entry['text'].empty?
+        detail = diagnostics['finish_reason'] || 'unknown'
+        raise Pondro::BindingError, 'AI returned an empty reply (finish_reason=' + detail + ', reasoning_bytes=' + diagnostics['reasoning_bytes'].to_s + ')'
+      end
       remember(entry)
       broadcast_now({ 'type' => 'message', 'entry' => entry })
     rescue StandardError => error
+      begin
+        Pondro::Future.new({ 'kind' => 'log', 'details' => {
+          'event' => 'example2.ai_error', 'ai_id' => participant['id'],
+          'model' => profile ? profile['model'] : nil,
+          'error' => error.message, 'error_class' => error.class.to_s,
+          'reply_bytes' => entry['text'].bytesize, 'stream' => diagnostics
+        } }).await
+      rescue StandardError
+        # A logging failure must not prevent notifying the chat.
+      end
       broadcast_now({ 'type' => 'ai_error', 'sequence' => entry['sequence'], 'text' => error.message })
     ensure
       begin
