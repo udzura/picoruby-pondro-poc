@@ -19,6 +19,12 @@ export class PondroHost {
     return run;
   }
 
+  reset() {
+    const run = this.tail.then(() => this.ctx.storage.deleteAll());
+    this.tail = run.catch(() => {});
+    return run;
+  }
+
   async run(identity, type, payload, chain) {
     const stored = this.ctx.storage.kv.get('pondro');
     if (stored && (stored.class !== identity.class || stored.id !== identity.id)) {

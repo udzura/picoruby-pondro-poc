@@ -86,6 +86,29 @@ test('host serializes suspended events, commits outside await, and rejects cycle
   } finally { runtime.destroy(); }
 });
 
+test('host reset waits for an active event and subsequent events restore defaults', async () => {
+  let stored;
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const runtime = new RubyRuntime(module);
+  const identity = { class: 'ChatRoom', id: 'reset' };
+  const ctx = { storage: {
+    kv: { get: () => structuredClone(stored), put: (_, value) => { stored = structuredClone(value); } },
+    transactionSync: fn => fn(), deleteAll: async () => { stored = undefined; }
+  } };
+  const host = new PondroHost(ctx, runtime, [], async () => { entered(); await gate; return 1; });
+  try {
+    const event = host.dispatch(identity, 'websocket.message', { id: 'a', message: 'Erase this history.' });
+    await started;
+    const reset = host.reset();
+    release(); await event; await reset;
+    assert.equal(stored, undefined);
+    assert.deepEqual(await host.dispatch(identity, 'rpc', { method: 'history' }), []);
+  } finally { release(); runtime.destroy(); }
+});
+
 test('WebSocket opt-in, Unicode, mutable history, trimming and restored socket IDs', async () => {
   let runtime = new RubyRuntime(module);
   const room = { class: 'ChatRoom', id: 'room', context: { sockets: ['a', 'b'] } };

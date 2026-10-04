@@ -26,6 +26,15 @@ creation/invitation controls are disabled, while joining rooms and chatting work
 normally. This is a UI-only switch, not server-side authorization; the API and
 participant removal are unchanged.
 
+The admin **Clear all demo data** button asks for confirmation, then disconnects
+users and deletes storage for every PONDRO in this Worker: AI, catalog, all rooms,
+history and counters, including human-only rooms. Active events finish before
+deletion. IDs can then be reused. Language preferences and Cloudflare credentials
+are retained. POST `/api/demo/reset?admin=1` is the demo reset endpoint; the query
+is not authentication. A `DemoAdmin` DO persists an inventory of objects used by
+HTTP, WebSocket and internal RPC. Objects predating this feature must be accessed
+once to enter the inventory. External KV, D1 and R2 binding data is not deleted.
+
 1. Enter a Room ID and your name, then connect.
 2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.
    Select a saved AI from the list to load its original name and personality.

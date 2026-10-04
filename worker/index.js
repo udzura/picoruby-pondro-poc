@@ -5,9 +5,14 @@ import { PondroHost } from './host.js';
 import { WebSocketAdapter } from './adapters/websocket.js';
 import { BindingAdapter } from './adapters/bindings.js';
 import { createMockAI } from '../example2/mock-ai.js';
+export { DemoAdmin } from './demo-admin.js';
 
 const MAX_BODY_BYTES = 8192;
 const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AICatalog', 'AIParticipant', 'AIChatRoom'];
+
+function demoAdmin(env) {
+  return env.DEMO_ADMIN.get(env.DEMO_ADMIN.idFromName('default'));
+}
 
 function route(url) {
   const match = url.pathname.match(/^\/(api|ws)\/([^/]+)\/([^/]+)$/);
@@ -54,6 +59,7 @@ export class PondroObject extends DurableObject {
         throw new Error('Invalid remote PONDRO identity');
       }
       const id = env.PONDRO.idFromName(JSON.stringify([request.class, request.id]));
+      await demoAdmin(env).register({ class: request.class, id: request.id });
       // Timeout also bounds independently initiated distributed wait cycles.
       let timer;
       try {
@@ -70,6 +76,11 @@ export class PondroObject extends DurableObject {
 
   invoke(identity, payload, chain = []) {
     return this.host.dispatch(identity, 'rpc', payload, chain);
+  }
+
+  reset() {
+    for (const socket of this.ctx.getWebSockets()) socket.close(1001, 'Demo data cleared');
+    return this.host.reset();
   }
 
   async fetch(request) {
@@ -114,12 +125,26 @@ export class PondroObject extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/demo/reset') {
+      if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+      if (url.searchParams.get('admin') !== '1') return new Response('Requires admin=1', { status: 403 });
+      try { return Response.json(await demoAdmin(env).clear()); }
+      catch (error) {
+        console.error('Demo reset failed', error);
+        return new Response('Demo reset failed', { status: 500 });
+      }
+    }
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
       let target;
       try { target = route(url); }
       catch (error) { return new Response(error.message, { status: 400 }); }
       if (!target) return new Response('Not found', { status: 404 });
       const id = env.PONDRO.idFromName(JSON.stringify([target.class, target.id]));
+      try { await demoAdmin(env).register({ class: target.class, id: target.id }); }
+      catch (error) {
+        console.error('Demo registration failed', error);
+        return new Response('Demo reset is in progress', { status: 503 });
+      }
       return env.PONDRO.get(id).fetch(request);
     }
     return env.ASSETS.fetch(request);

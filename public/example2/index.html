@@ -44,6 +44,12 @@
           <p id="ai-info" class="hint" role="status" data-i18n="personaHint">The first prompt is saved for this AI ID. Use a new ID for another personality.</p>
           <button id="invite" class="secondary wide" data-i18n="invite" disabled>Invite AI to this room</button>
         </section>
+        <section class="card">
+          <p class="step" data-i18n="demoTools">03 / Demo tools</p>
+          <p class="hint" data-i18n="clearHint">Delete all demo rooms, AI, chat history and counters. Connected users will be disconnected.</p>
+          <button type="button" id="clear-data" class="danger wide" data-i18n="clearData" disabled>Clear all demo data</button>
+          <p id="reset-status" class="hint" role="status"></p>
+        </section>
       </aside>
       <section class="chat card" aria-label="Chat room" data-i18n-aria="chatRoom">
         <div class="chat-heading"><div><p class="step" data-i18n="conversation">The conversation</p><h2 id="room-title" data-i18n="chooseRoom">Choose your room</h2></div><span id="connection" class="connection" role="status" data-i18n="disconnected">Disconnected</span></div>
@@ -61,5 +67,13 @@
       </section>
     </div>
   </main>
+  <dialog id="reset-confirm" aria-labelledby="reset-title">
+    <h2 id="reset-title" data-i18n="clearData">Clear all demo data</h2>
+    <p data-i18n="clearConfirm">Delete all demo rooms, AI, chat history and counters? This cannot be undone. Connected users will be disconnected.</p>
+    <div class="actions">
+      <button type="button" id="cancel-reset" class="secondary" data-i18n="cancel" autofocus>Cancel</button>
+      <button type="button" id="confirm-reset" class="danger" data-i18n="clearData">Clear all demo data</button>
+    </div>
+  </dialog>
 </body>
 </html>

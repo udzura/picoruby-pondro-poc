@@ -29,10 +29,14 @@ input:focus, textarea:focus { outline: 2px solid #91b49b; outline-offset: 1px; }
 input:read-only, textarea:read-only { background: #f3f4ef; color: #6e776e; }
 button { border: 1px solid #2e6048; background: #2e6048; color: white; border-radius: 8px; padding: 11px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 button.secondary { background: transparent; color: #2e6048; border-color: #c8d4c8; }
+button.danger { background: #fff8f5; border-color: #c99b8d; color: #9a4b39; }
 button:disabled { opacity: .45; cursor: default; }
 .actions { display: flex; gap: 8px; }
 .actions button { flex: 1; }
 .wide { width: 100%; }
+dialog { width: min(480px, calc(100% - 32px)); padding: 28px; border: 1px solid #dedfd4; border-radius: 18px; background: #fffefa; color: inherit; }
+dialog::backdrop { background: rgb(35 48 40 / 35%); }
+dialog p { font-size: 14px; line-height: 1.7; margin: 20px 0 24px; }
 .hint { font-size: 12px; line-height: 1.6; color: #778078; overflow-wrap: anywhere; }
 .chat { display: flex; flex-direction: column; min-height: 740px; padding: 0; overflow: hidden; }
 .chat-heading { padding: 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #eeeee5; }

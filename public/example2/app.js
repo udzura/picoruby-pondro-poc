@@ -10,22 +10,24 @@ let self;
 let loadedAI;
 let loadingAI = false;
 let loadingCatalog = false;
+let resetting = false;
 
 function connected() { return socket?.readyState === WebSocket.OPEN; }
 function controls() {
   const open = connected();
-  $('connect').disabled = !!socket;
+  $('connect').disabled = !!socket || resetting;
   $('disconnect').disabled = !socket;
-  $('room-id').disabled = !!socket;
-  $('human-name').disabled = !!socket;
-  $('message').disabled = !open || active.size > 0;
-  $('send').disabled = !open || active.size > 0;
-  $('ai-settings').disabled = !admin;
-  $('invite').disabled = !admin || !open || !loadedAI || active.size > 0 || loadingAI;
+  $('room-id').disabled = !!socket || resetting;
+  $('human-name').disabled = !!socket || resetting;
+  $('message').disabled = !open || active.size > 0 || resetting;
+  $('send').disabled = !open || active.size > 0 || resetting;
+  $('ai-settings').disabled = !admin || resetting;
+  $('invite').disabled = !admin || !open || !loadedAI || active.size > 0 || loadingAI || resetting;
   $('create-ai').disabled = !admin || loadingAI || loadingCatalog;
   $('refresh-ai').disabled = !admin || loadingAI || loadingCatalog;
   $('existing-ai').disabled = !admin || loadingAI || loadingCatalog || $('existing-ai').options.length <= 1;
-  for (const button of $('participants').querySelectorAll('button')) button.disabled = !open || active.size > 0;
+  $('clear-data').disabled = !admin || resetting || loadingAI || loadingCatalog || active.size > 0;
+  for (const button of $('participants').querySelectorAll('button')) button.disabled = !open || active.size > 0 || resetting;
 }
 
 function element(tag, className, text = '') {
@@ -130,7 +132,7 @@ function receive(event) {
 
 $('connect-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (socket) return;
+  if (socket || resetting) return;
   const room = $('room-id').value.trim();
   const name = $('human-name').value.trim();
   if (!room || !name || encoder.encode(name).length > 128) { localize($('chat-status'), 'invalidConnection'); return; }
@@ -189,7 +191,7 @@ async function refreshCatalog() {
 }
 
 async function loadAI(id, create = false) {
-  if (!admin || loadingAI) return;
+  if (!admin || loadingAI || resetting) return;
   const name = $('ai-name').value.trim();
   const prompt = $('personality').value.trim();
   if (create && (encoder.encode(name).length > 128 || encoder.encode(prompt).length > 4096)) {
@@ -231,12 +233,38 @@ $('ai-form').addEventListener('submit', event => {
   loadAI($('ai-id').value.trim(), true);
 });
 $('invite').addEventListener('click', () => {
-  if (admin && connected() && loadedAI && !active.size && !loadingAI) socket.send(JSON.stringify({ type: 'invite', ai_id: loadedAI.id }));
+  if (admin && connected() && loadedAI && !active.size && !loadingAI && !resetting) socket.send(JSON.stringify({ type: 'invite', ai_id: loadedAI.id }));
+});
+$('clear-data').addEventListener('click', () => {
+  if (!admin || resetting || loadingAI || loadingCatalog || active.size) return;
+  $('reset-confirm').showModal();
+});
+$('cancel-reset').addEventListener('click', () => $('reset-confirm').close());
+$('confirm-reset').addEventListener('click', async () => {
+  if (!admin || resetting || loadingAI || loadingCatalog || active.size) return;
+  $('reset-confirm').close();
+  resetting = true;
+  loadedAI = null;
+  socket?.close(1000, 'Demo reset requested'); socket = null;
+  localize($('connection'), 'disconnected'); $('connection').classList.remove('connected');
+  localize($('reset-status'), 'clearing'); controls();
+  try {
+    const response = await fetch('/api/demo/reset?admin=1', { method: 'POST' });
+    if (!response.ok) throw new Error(await response.text());
+    entries.clear(); active.clear(); loadedAI = null; self = undefined;
+    $('connect-form').reset(); $('ai-form').reset(); $('message').value = '';
+    $('ai-name').readOnly = false; $('personality').readOnly = false;
+    localize($('room-title'), 'chooseRoom'); localize($('mode'), 'mode');
+    $('timeline').replaceChildren(); participants([]); plain($('chat-status'));
+    localize($('ai-info'), 'personaHint'); localize($('reset-status'), 'cleared');
+    await refreshCatalog();
+  } catch (error) { localize($('reset-status'), 'error', { detail: error.message }); }
+  finally { resetting = false; controls(); }
 });
 $('message-form').addEventListener('submit', event => {
   event.preventDefault();
   const text = $('message').value.trim();
-  if (!connected() || active.size || !text) return;
+  if (!connected() || active.size || !text || resetting) return;
   if (encoder.encode(text).length > 2000) { localize($('chat-status'), 'messageTooLong'); return; }
   const frame = JSON.stringify({ type: 'say', text });
   if (encoder.encode(frame).length > 4096) { localize($('chat-status'), 'frameTooLong'); return; }
