@@ -24,13 +24,13 @@ module Example2
       unless place['latitude'].is_a?(Numeric) && place['longitude'].is_a?(Numeric)
         raise Pondro::BindingError, 'Invalid geocoding coordinates'
       end
-      data = json(bindings, 'https://api.open-meteo.com/v1/jma?latitude=' + place['latitude'].to_s +
+      data = json(bindings, 'https://api.open-meteo.com/v1/forecast?latitude=' + place['latitude'].to_s +
                   '&longitude=' + place['longitude'].to_s + '&timezone=Asia%2FTokyo&forecast_days=' + days.to_s +
                   '&daily=' + DAILY.join(','))
       daily = data['daily']
       unless daily.is_a?(Hash) && daily['time'].is_a?(Array) && daily['time'].length == days &&
              DAILY.all? { |key| daily[key].is_a?(Array) && daily[key].length == days }
-        raise Pondro::BindingError, 'Invalid JMA daily forecast'
+        raise Pondro::BindingError, 'Invalid Open-Meteo daily forecast'
       end
       forecast = Array.new(days) do |index|
         date = daily['time'][index]
@@ -43,7 +43,7 @@ module Example2
         end
         row
       end
-      { 'status' => 'ok', 'source' => 'Open-Meteo JMA (geocoding: GeoNames)',
+      { 'status' => 'ok', 'source' => 'Open-Meteo (geocoding: GeoNames)',
         'location' => { 'name' => place['name'], 'prefecture' => place['admin1'],
                         'latitude' => place['latitude'], 'longitude' => place['longitude'] },
         'timezone' => 'Asia/Tokyo', 'units' => { 'weather_code' => 'WMO code',

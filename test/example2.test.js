@@ -392,7 +392,7 @@ test('agent rejects unknown and invalid tools before execution and can handle th
 });
 
 
-test('agent weather tool fetches Japanese geocoding and JMA forecasts through real Wasm', async (t) => {
+test('agent weather tool fetches Japanese geocoding and weather forecasts through real Wasm', async (t) => {
   t.mock.method(console, 'error', () => {});
   const logs = t.mock.method(console, 'info', () => {});
   const requests = [];
@@ -420,7 +420,8 @@ test('agent weather tool fetches Japanese geocoding and JMA forecasts through re
         [place, { ...place, admin1: '埼玉県' }] : [place, { ...place, country_code: 'US' }] });
     }
     assert.equal(url.hostname, 'api.open-meteo.com');
-    assert.equal(url.pathname, '/v1/jma');
+    assert.equal(url.pathname, '/v1/forecast');
+    assert.equal(url.searchParams.has('models'), false);
     assert.equal(url.searchParams.get('latitude'), '33.6');
     assert.equal(url.searchParams.get('timezone'), 'Asia/Tokyo');
     assert.equal(url.searchParams.get('forecast_days'), '2');
@@ -447,6 +448,7 @@ test('agent weather tool fetches Japanese geocoding and JMA forecasts through re
     assert.equal(logs.mock.calls[5].arguments[1].ai_id, 'weather');
     assert.equal(logs.mock.calls[5].arguments[1].content_bytes > 0, true);
     assert.equal(result.status, 'ok');
+    assert.equal(result.source, 'Open-Meteo (geocoding: GeoNames)');
     assert.equal(result.location.prefecture, '福岡県');
     assert.equal(result.forecast[1].temperature_2m_min, null);
     assert.equal(result.forecast[1].precipitation_sum, 4.2);
@@ -466,7 +468,7 @@ test('agent weather tool fetches Japanese geocoding and JMA forecasts through re
       mode = failure;
       await ask();
       assert.match(human.events.findLast(event => event.type === 'ai_error').text,
-        failure === 'http' ? /HTTP 503/ : /Invalid JMA/);
+        failure === 'http' ? /HTTP 503/ : /Invalid Open-Meteo/);
     }
     mode = 'ok';
     await ask();

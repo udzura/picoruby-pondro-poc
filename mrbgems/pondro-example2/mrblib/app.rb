@@ -99,7 +99,7 @@ class AIChatRoom < Example2::Object
     'required' => ['key'], 'additionalProperties' => false
   }
   tool :japan_weather, openai_compat: true,
-    description: 'Fetch current daily forecasts for Japan from Open-Meteo JMA. Prefer a romanized city name; specify the Japanese prefecture to disambiguate.', parameters: {
+    description: 'Fetch current daily forecasts for Japan from Open-Meteo. Prefer a romanized city name; specify the Japanese prefecture to disambiguate.', parameters: {
     'type' => 'object', 'properties' => {
       'location' => { 'type' => 'string', 'description' => 'City name, e.g. Fukuoka or Tokyo' },
       'prefecture' => { 'type' => 'string', 'description' => 'Japanese prefecture name, e.g. 福岡県 or 東京都' },
@@ -282,7 +282,7 @@ class AIChatRoom < Example2::Object
   def conversation(profile)
     system = profile['prompt'] + "\nYour display name is " + profile['name'] + '. Reply to the latest message in this shared chat.'
     if profile['bot_type'] == 'agent'
-      system += "\nFor Japanese weather forecasts, always call japan_weather. Translate city names to romanized names and provide the Japanese prefecture when known. For ambiguous or missing locations, clarify or retry with a more precise name. Report the resolved location, dates and units, cite Open-Meteo JMA, and never invent forecasts or missing values. weather_code uses WMO codes; precipitation_sum is rainfall/snowfall amount, not probability."
+      system += "\nFor Japanese weather forecasts, always call japan_weather. Translate city names to romanized names and provide the Japanese prefecture when known. For ambiguous or missing locations, clarify or retry with a more precise name. Report the resolved location, dates and units, cite Open-Meteo, and never invent forecasts or missing values. weather_code uses WMO codes; precipitation_sum is rainfall/snowfall amount, not probability."
     end
     [{ 'role' => 'system', 'content' => system }] + messages.last(20).map do |entry|
       own_reply = entry['sender']['kind'] == 'ai' && entry['sender']['id'] == profile['id']
