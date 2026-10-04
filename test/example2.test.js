@@ -185,7 +185,40 @@ test('removing an AI broadcasts its departure, persists and preserves its other 
     await carol.dispatch({ type: 'say', text: 'Shared AI still responds here.' });
     assert.match(prompts[1], /^Original personality/);
     await restored.dispatch({ type: 'invite', ai_id: 'shared' });
-    assert.equal(restored.events.at(-1).participants.length, 2);
+    assert.equal(restored.events.findLast(event => event.type === 'participants').participants.length, 2);
     await assert.rejects(w.get('AIParticipant', 'shared').dispatch('http.rpc', { method: 'leave', args: ['second'] }), /HTTP/);
+  } finally { w.destroy(); }
+});
+
+test('human and AI joins reach everyone in the room, without duplicate invites or stored chat messages', async () => {
+  const w = world({ async run() { throw new Error('Joining must not trigger inference'); } });
+  const joins = client => client.events.filter(event => event.type === 'notice' && event.action === 'join');
+  try {
+    const alice = await w.connect('joins', 'Alice');
+    assert.equal(alice.events[0].type, 'welcome');
+    assert.deepEqual(joins(alice)[0], {
+      type: 'notice', action: 'join', participant: { kind: 'human', id: alice.id, name: 'Alice' }, text: 'Alice joined the room.'
+    });
+    const bob = await w.connect('joins', 'Bob');
+    assert.deepEqual(joins(alice).at(-1), joins(bob).at(-1));
+    assert.equal(joins(bob).at(-1).participant.name, 'Bob');
+    const carol = await w.connect('other', 'Carol');
+    await w.configure('helper', '助っ人🌿', 'Be helpful.');
+    await alice.dispatch({ type: 'invite', ai_id: 'helper' });
+    const joinedAI = joins(alice).at(-1);
+    assert.deepEqual(joinedAI.participant, { kind: 'ai', id: 'helper', name: '助っ人🌿' });
+    assert.deepEqual(joins(bob).at(-1), joinedAI);
+    assert.equal(joins(carol).length, 1, 'join notices must stay in their room');
+    const count = joins(alice).length;
+    await alice.dispatch({ type: 'invite', ai_id: 'helper' });
+    await alice.dispatch({ type: 'invite', ai_id: 'missing' });
+    assert.equal(joins(alice).length, count, 'duplicate and failed invitations must not announce joins');
+    assert.deepEqual(w.snapshots.get('AIChatRoom:joins').state.messages, []);
+    w.restore('AIChatRoom', 'joins');
+    const returning = await w.connect('joins', 'Returning');
+    assert.equal(joins(returning).length, 1);
+    assert.equal(joins(returning)[0].participant.name, 'Returning');
+    assert.deepEqual(returning.events[0].participants, [{ id: 'helper', name: '助っ人🌿' }]);
+    assert.deepEqual(returning.events[0].history, []);
   } finally { w.destroy(); }
 });

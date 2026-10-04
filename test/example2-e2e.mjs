@@ -85,8 +85,14 @@ try {
   const bob = await connect('garden', 'Bob');
   const carol = await connect('studio', 'Carol');
   assert.equal(alice.welcome.ai_mode, 'mock');
+  const bobJoin = await bob.wait(event => event.type === 'notice' && event.action === 'join' && event.participant.name === 'Bob');
+  assert.equal(bobJoin.participant.kind, 'human');
+  assert.deepEqual(await alice.wait(event => event.type === 'notice' && event.action === 'join' && event.participant.name === 'Bob'), bobJoin);
   alice.send({ type: 'invite', ai_id: 'sage' });
   for (const client of [alice, bob]) assert.equal((await client.wait(event => event.type === 'participants')).participants[0].id, 'sage');
+  const aiJoins = await Promise.all([alice, bob].map(client => client.wait(event => event.type === 'notice' && event.action === 'join' && event.participant.kind === 'ai')));
+  assert.deepEqual(aiJoins[0], aiJoins[1]);
+  assert.equal(aiJoins[0].participant.name, 'Sage');
   carol.send({ type: 'invite', ai_id: 'sage' });
   await carol.wait(event => event.type === 'participants');
   alice.send({ type: 'say', text: 'こんにちは 🌿' });
@@ -112,7 +118,7 @@ try {
   const denied = await fetch(`${base}/api/AIParticipant/sage`, { method: 'POST', body: '{"method":"join","args":["hidden"]}' });
   assert.equal(denied.status, 403);
   const closed = once(bob.socket, 'close'); bob.socket.close(1000, 'Leaving'); await closed;
-  assert.match((await alice.wait(event => event.type === 'notice')).text, /Bob left/);
+  assert.match((await alice.wait(event => event.type === 'notice' && event.text === 'Bob left the room.')).text, /Bob left/);
   await Promise.all(sockets.filter(socket => socket.readyState === WebSocket.OPEN).map(async socket => {
     const closed = once(socket, 'close'); socket.close(1000); await closed;
   }));

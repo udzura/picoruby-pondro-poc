@@ -92,7 +92,6 @@ function receive(event) {
       localize($('mode'), event.ai_mode === 'mock' ? 'mock' : 'live');
       participants(event.participants);
       for (const entry of event.history) render(entry);
-      if (!event.history.length) $('timeline').append(translated('p', 'notice', admin ? 'joined' : 'joinedGuest'));
       plain($('chat-status'));
       break;
     case 'participants': participants(event.participants); break;
@@ -114,7 +113,11 @@ function receive(event) {
     case 'notice': {
       clearEmpty();
       const departure = event.text.match(/^([\s\S]*) left the room\.$/);
-      $('timeline').append(departure ? translated('p', 'notice', 'departed', { name: departure[1] }) : element('p', 'notice', event.text));
+      if (event.action === 'join' && event.participant) {
+        $('timeline').append(translated('p', 'notice', event.participant.kind === 'ai' ? 'aiJoinedRoom' : 'humanJoinedRoom', { name: event.participant.name }));
+      } else {
+        $('timeline').append(departure ? translated('p', 'notice', 'departed', { name: departure[1] }) : element('p', 'notice', event.text));
+      }
       scroll(); break;
     }
     case 'error': localize($('chat-status'), 'error', { detail: event.text }); break;

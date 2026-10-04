@@ -59,10 +59,11 @@ class AIChatRoom < Pondro::Object
   end
 
   def on_connect(socket)
-    human_name(socket) # Validate the immutable connection parameters.
+    name = human_name(socket) # Validate the immutable connection parameters.
     socket.send(JSON.generate({ 'type' => 'welcome', 'room' => id, 'self' => socket.id,
                                'history' => messages, 'participants' => participants,
                                'ai_mode' => @context['ai_mode'] || 'live' }))
+    announce_join({ 'kind' => 'human', 'id' => socket.id, 'name' => name })
   end
 
   def on_close(socket, code, reason)
@@ -104,6 +105,13 @@ class AIChatRoom < Pondro::Object
     profile = AIParticipant[ai_id].join(id).await
     participants << { 'id' => ai_id, 'name' => profile['name'] }
     sockets.each { |client| client.send(JSON.generate({ 'type' => 'participants', 'participants' => participants })) }
+    announce_join({ 'kind' => 'ai', 'id' => ai_id, 'name' => profile['name'] })
+  end
+
+  def announce_join(participant)
+    payload = JSON.generate({ 'type' => 'notice', 'action' => 'join', 'participant' => participant,
+                              'text' => participant['name'] + ' joined the room.' })
+    sockets.each { |client| client.send(payload) }
   end
 
   def remove(ai_id)

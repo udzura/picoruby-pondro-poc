@@ -38,6 +38,10 @@ AIs, each responding once per human message, in invitation order.
 Use **Remove** on an AI's participant chip to remove it from the current room.
 Its personality, other rooms and existing messages remain available, and it can
 be invited again. Removal is disabled while an AI response is in progress.
+Human connections and new AI invitations broadcast a join notice to everyone in
+that room, including the joining human. Re-inviting an AI already in the room
+does not repeat the notice. Notices follow the UI language and are not saved as
+chat history or sent to the model.
 
 For real inference, authenticate Wrangler with Cloudflare and run:
 
