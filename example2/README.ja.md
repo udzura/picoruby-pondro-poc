@@ -5,6 +5,37 @@
 AI IDごとに性格を保存し、同じAIを複数Roomへ招待できるWebSocketチャットです。
 人間も同じRoomに参加します。会話履歴はRoomごとに独立し、JSのUIは`/example2/`です。
 
+## Basic認証
+
+静的アセット・HTTP API・WebSocketの接続開始は、すべてBasic認証を通ります。
+`BASIC_AUTH_USER`と`BASIC_AUTH_PASSWORD`をSecretとして設定してください。
+未設定・空文字の場合は503、不正な認証情報の場合は401を返します。
+ユーザー名に`:`は使えません。パスワードには使用できます。
+
+ローカルでは、利用するWrangler設定と同じディレクトリの`.dev.vars`に記述します。
+ルートの設定は`.dev.vars`、Example 2の設定は`example2/.dev.vars`を使います。
+これらのファイルはGit管理対象外です。
+
+```dotenv
+BASIC_AUTH_USER="demo"
+BASIC_AUTH_PASSWORD="replace-with-your-password"
+```
+
+公開先のSecretは、Cloudflareの設定画面または以下のコマンドで登録します。
+Example 2の場合は`--config example2/wrangler.jsonc`を指定します。
+`wrangler secret put`は公開先のWorkerを更新するため、公開時に実行してください。
+
+```sh
+npx wrangler secret put BASIC_AUTH_USER --config example2/wrangler.jsonc
+npx wrangler secret put BASIC_AUTH_PASSWORD --config example2/wrangler.jsonc
+```
+
+ブラウザーで最初に認証すると、同じサイトのアセット・API・WebSocketにも認証情報を
+送信します。`admin=1`はログイン後のデモ管理UIを有効にする切り替えのままです。
+Wranglerの`assets.run_worker_first: true`で全アセットをWorker経由にしています。
+[Secretの公式ドキュメント](https://developers.cloudflare.com/workers/configuration/secrets/)
+と[アセットのルーティング](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/)を参照してください。
+
 ## 起動
 
 ルートで`npm ci`と`npm run setup`を済ませた後、起動します。

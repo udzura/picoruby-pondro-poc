@@ -18,6 +18,10 @@ const base = `http://127.0.0.1:${port}`;
 let process;
 let logs = '';
 const sockets = [];
+const auth = 'Basic ' + Buffer.from('e2e-user:e2e-password').toString('base64');
+function authenticatedFetch(url, options = {}) {
+  return fetch(url, { ...options, headers: { ...options.headers, Authorization: auth } });
+}
 
 
 async function seedR2() {
@@ -39,7 +43,8 @@ async function seedR2() {
 async function start() {
   logs = '';
   process = spawn(globalThis.process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'dev',
-    '--port', String(port), '--inspector-port', '0', '--persist-to', join(temporary, 'state')], {
+    '--port', String(port), '--inspector-port', '0', '--persist-to', join(temporary, 'state'),
+    '--var', 'BASIC_AUTH_USER:e2e-user', '--var', 'BASIC_AUTH_PASSWORD:e2e-password'], {
     env: { ...globalThis.process.env, WRANGLER_SEND_METRICS: 'false',
       XDG_CONFIG_HOME: join(temporary, 'config'), XDG_CACHE_HOME: join(temporary, 'cache') },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -48,7 +53,7 @@ async function start() {
   process.stderr.on('data', data => { logs += data; });
   for (let i = 0; i < 150; i++) {
     if (process.exitCode !== null) throw new Error(logs);
-    try { if ((await fetch(base, { signal: AbortSignal.timeout(500) })).ok) return; } catch {}
+    try { if ((await authenticatedFetch(base, { signal: AbortSignal.timeout(500) })).ok) return; } catch {}
     await delay(200);
   }
   throw new Error(`Wrangler startup timed out: ${logs}`);
@@ -63,7 +68,7 @@ async function stop() {
 }
 
 async function rpc(klass, id, method, args = []) {
-  const response = await fetch(`${base}/api/${klass}/${id}`, {
+  const response = await authenticatedFetch(`${base}/api/${klass}/${id}`, {
     method: 'POST', body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(5000)
   });
   assert.equal(response.status, 200, await response.clone().text());
@@ -79,7 +84,7 @@ function nextMessage(socket) {
 }
 
 async function connect(room, counter = room) {
-  const socket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/ChatRoom/${room}?counter_id=${encodeURIComponent(counter)}`);
+  const socket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/ChatRoom/${room}?counter_id=${encodeURIComponent(counter)}`, { headers: { Authorization: auth } });
   sockets.push(socket);
   const welcome = nextMessage(socket);
   await once(socket, 'open');
@@ -92,7 +97,7 @@ try {
   assert.deepEqual(await rpc('StreamProbe', 'read', 'read_object', ['sample', 'read_all']), [...new TextEncoder().encode('日本語\n\nfinal')]);
   assert.deepEqual(await rpc('StreamProbe', 'read', 'read_object', ['sample', 'readline']), [...new TextEncoder().encode('日本語\n')]);
   assert.equal(await rpc('StreamProbe', 'read', 'read_object', ['missing']), null);
-  const live = new WebSocket(`${base.replace('http:', 'ws:')}/ws/StreamProbe/live`);
+  const live = new WebSocket(`${base.replace('http:', 'ws:')}/ws/StreamProbe/live`, { headers: { Authorization: auth } });
   sockets.push(live);
   const ready = nextMessage(live);
   await once(live, 'open');
@@ -106,7 +111,7 @@ try {
   live.send('sample');
   await done;
   assert.deepEqual(streamed, [{ type: 'line', text: '日本語\n' }, { type: 'line', text: '\n' }, { type: 'line', text: 'final' }, { type: 'done' }]);
-  assert.match(await (await fetch(base)).text(), /PONDRO playground/);
+  assert.match(await (await authenticatedFetch(base)).text(), /PONDRO playground/);
   const note = { kv: "日本語 and 'bound SQL'", d1: "日本語 and 'bound SQL'" };
   assert.deepEqual(await rpc('BindingProbe', 'note', 'store_note', [note.kv]), note);
   assert.deepEqual(await rpc('BindingProbe', 'note', 'read_note'), note);
@@ -131,7 +136,7 @@ try {
   assert.equal(await rpc('Counter', 'speech-total', 'value'), 1);
   assert.equal(await rpc('Counter', 'lobby', 'value'), 0);
   assert.equal(await rpc('Counter', 'other-total', 'value'), 0);
-  assert.equal((await fetch(`${base}/api/ChatRoom/lobby`, { method: 'POST', body: '{"method":"history","http":true,"type":"rpc"}' })).status, 403);
+  assert.equal((await authenticatedFetch(`${base}/api/ChatRoom/lobby`, { method: 'POST', body: '{"method":"history","http":true,"type":"rpc"}' })).status, 403);
   assert.equal(other.welcome.history.length, 0);
   assert.equal(otherReceived, false);
   const departure = nextMessage(a.socket);
@@ -144,12 +149,12 @@ try {
   assert.notEqual(notice.id, (await messages[0]).entry.sender);
   assert.equal(await rpc('Counter', 'speech-total', 'value'), 1);
   assert.equal(otherReceived, false);
-  const forbidden = await fetch(`${base}/api/Counter/one`, { method: 'POST', body: '{"method":"send"}' });
+  const forbidden = await authenticatedFetch(`${base}/api/Counter/one`, { method: 'POST', body: '{"method":"send"}' });
   assert.equal(forbidden.status, 403);
-  assert.equal((await fetch(`${base}/ws/Counter/one`)).status, 400);
-  assert.equal((await fetch(`${base}/ws/BindingProbe/note`)).status, 400);
-  assert.equal((await fetch(`${base}/ws/ChatRoom/lobby`)).status, 426);
-  const oversized = await fetch(`${base}/api/Counter/one`, { method: 'POST', body: 'x'.repeat(9000) });
+  assert.equal((await authenticatedFetch(`${base}/ws/Counter/one`)).status, 400);
+  assert.equal((await authenticatedFetch(`${base}/ws/BindingProbe/note`)).status, 400);
+  assert.equal((await authenticatedFetch(`${base}/ws/ChatRoom/lobby`)).status, 426);
+  const oversized = await authenticatedFetch(`${base}/api/Counter/one`, { method: 'POST', body: 'x'.repeat(9000) });
   assert.equal(oversized.status, 400);
   const binary = await connect('binary');
   const closed = once(binary.socket, 'close');

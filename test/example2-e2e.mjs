@@ -16,6 +16,10 @@ const port = listener.address().port;
 await new Promise(resolve => listener.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const sockets = [];
+const auth = 'Basic ' + Buffer.from('e2e-user:e2e-password').toString('base64');
+function authenticatedFetch(url, options = {}) {
+  return fetch(url, { ...options, headers: { ...options.headers, Authorization: auth } });
+}
 let worker;
 let logs = '';
 
@@ -23,7 +27,8 @@ async function start() {
   logs = '';
   worker = spawn(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'dev',
     '--config', 'example2/wrangler.mock.jsonc', '--port', String(port), '--inspector-port', '0',
-    '--persist-to', join(temporary, 'state')], {
+    '--persist-to', join(temporary, 'state'),
+    '--var', 'BASIC_AUTH_USER:e2e-user', '--var', 'BASIC_AUTH_PASSWORD:e2e-password'], {
     env: { ...process.env, WRANGLER_SEND_METRICS: 'false', XDG_CONFIG_HOME: join(temporary, 'config'), XDG_CACHE_HOME: join(temporary, 'cache') },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -31,7 +36,7 @@ async function start() {
   worker.stderr.on('data', data => { logs += data; });
   for (let i = 0; i < 150; i++) {
     if (worker.exitCode !== null) throw new Error(logs);
-    try { if ((await fetch(`${base}/example2/`, { signal: AbortSignal.timeout(500) })).ok) return; } catch {}
+    try { if ((await authenticatedFetch(`${base}/example2/`, { signal: AbortSignal.timeout(500) })).ok) return; } catch {}
     await delay(200);
   }
   throw new Error(`Wrangler startup timed out: ${logs}`);
@@ -44,14 +49,14 @@ async function stop() {
   try { await exited; } finally { clearTimeout(timer); }
 }
 async function rpc(id, method, args = [], klass = 'AIParticipant') {
-  const response = await fetch(`${base}/api/${klass}/${encodeURIComponent(id)}`, {
+  const response = await authenticatedFetch(`${base}/api/${klass}/${encodeURIComponent(id)}`, {
     method: 'POST', body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(5000)
   });
   assert.equal(response.status, 200, await response.clone().text());
   return (await response.json()).value;
 }
 async function connect(room, name) {
-  const socket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/AIChatRoom/${room}?name=${encodeURIComponent(name)}`);
+  const socket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/AIChatRoom/${room}?name=${encodeURIComponent(name)}`, { headers: { Authorization: auth } });
   sockets.push(socket);
   const events = [];
   const waiting = new Set();
@@ -76,7 +81,21 @@ async function connect(room, name) {
 
 try {
   await start();
-  assert.match(await (await fetch(`${base}/example2/`)).text(), /A room for everyone/);
+  for (const path of ['/example2/', '/example2/app.js', '/example2/style.css', '/api/AIParticipant/sage', '/api/demo/reset?admin=1', '/ws/AIChatRoom/garden']) {
+    const denied = await fetch(`${base}${path}`);
+    assert.equal(denied.status, 401, path);
+    assert.match(denied.headers.get('WWW-Authenticate'), /^Basic /);
+    assert.equal((await fetch(`${base}${path}`, { headers: { Authorization: 'Basic ' + Buffer.from('e2e-user:wrong').toString('base64') } })).status, 401, path);
+  }
+  const rejectedSocket = new WebSocket(`${base.replace('http:', 'ws:')}/ws/AIChatRoom/unauthenticated`);
+  const [request, response] = await once(rejectedSocket, 'unexpected-response');
+  assert.equal(response.statusCode, 401);
+  response.resume();
+  rejectedSocket.on('error', () => {});
+  rejectedSocket.terminate();
+  assert.equal((await authenticatedFetch(`${base}/example2/app.js`)).status, 200);
+  assert.equal((await authenticatedFetch(`${base}/example2/style.css`)).status, 200);
+  assert.match(await (await authenticatedFetch(`${base}/example2/`)).text(), /A room for everyone/);
   assert.equal(await rpc('sage', 'profile'), null);
   const created = await rpc('sage', 'configure', ['Sage', 'Be a curious botanist.']);
   assert.equal(created.created, true);
@@ -117,7 +136,7 @@ try {
   alice.send({ type: 'say', text: 'No AI in this room now.' });
   await alice.wait(event => event.type === 'ready' && alice.events.indexOf(event) >= marker);
   assert.equal(alice.events.slice(marker).some(event => event.type === 'ai_start'), false);
-  const denied = await fetch(`${base}/api/AIParticipant/sage`, { method: 'POST', body: '{"method":"join","args":["hidden"]}' });
+  const denied = await authenticatedFetch(`${base}/api/AIParticipant/sage`, { method: 'POST', body: '{"method":"join","args":["hidden"]}' });
   assert.equal(denied.status, 403);
   const closed = once(bob.socket, 'close'); bob.socket.close(1000, 'Leaving'); await closed;
   assert.match((await alice.wait(event => event.type === 'notice' && event.text === 'Bob left the room.')).text, /Bob left/);
@@ -138,11 +157,11 @@ try {
   solo.send({ type: 'say', text: 'Human-only room history.' });
   await solo.wait(event => event.type === 'ready');
   assert.equal(await rpc('reset-counter', 'increment', [], 'Counter'), 1);
-  const refused = await fetch(`${base}/api/demo/reset`, { method: 'POST' });
+  const refused = await authenticatedFetch(`${base}/api/demo/reset`, { method: 'POST' });
   assert.equal(refused.status, 403);
   assert.equal((await rpc('sage', 'profile')).name, 'Sage');
   const closures = [solo.socket, restored.socket].map(socket => once(socket, 'close'));
-  const cleared = await fetch(`${base}/api/demo/reset?admin=1`, { method: 'POST' });
+  const cleared = await authenticatedFetch(`${base}/api/demo/reset?admin=1`, { method: 'POST' });
   assert.equal(cleared.status, 200, await cleared.clone().text());
   assert.ok((await cleared.json()).cleared >= 6);
   await Promise.all(closures);

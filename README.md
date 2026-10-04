@@ -11,6 +11,37 @@ It does not depend on picoruby-cloudflare-worker-wasm or another Worker framewor
 Use `npm run dev:example2:mock` for an offline demo or `npm run dev:example2`
 for Workers AI, then open `/example2/`.
 
+## Basic authentication
+
+Static assets, HTTP APIs and WebSocket handshakes all require Basic authentication.
+Set the `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` secrets. Missing or empty secrets
+return 503; invalid credentials return 401. The username cannot contain a colon;
+passwords can.
+
+For local development, create `.dev.vars` beside the Wrangler configuration:
+`.dev.vars` for the root Worker or `example2/.dev.vars` for either Example 2 config.
+These files are ignored by Git.
+
+```dotenv
+BASIC_AUTH_USER="demo"
+BASIC_AUTH_PASSWORD="replace-with-your-password"
+```
+
+Set deployed secrets through the Cloudflare dashboard or the commands below.
+Use the root config instead when deploying the root Worker. `wrangler secret put`
+updates the deployed Worker, so run these commands when publishing.
+
+```sh
+npx wrangler secret put BASIC_AUTH_USER --config example2/wrangler.jsonc
+npx wrangler secret put BASIC_AUTH_PASSWORD --config example2/wrangler.jsonc
+```
+
+After the browser login, credentials are sent with same-site asset, API and
+WebSocket requests. `admin=1` still enables the demo management UI after login.
+All assets pass through the Worker using `assets.run_worker_first: true`.
+See the official [secret documentation](https://developers.cloudflare.com/workers/configuration/secrets/)
+and [asset routing documentation](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/).
+
 ## Run locally
 
 Requirements: Ruby with `rake`, Node.js with WebAssembly JSPI support

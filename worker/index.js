@@ -5,6 +5,7 @@ import { PondroHost } from './host.js';
 import { WebSocketAdapter } from './adapters/websocket.js';
 import { BindingAdapter } from './adapters/bindings.js';
 import { createMockAI } from '../example2/mock-ai.js';
+import { authenticate } from './basic-auth.js';
 export { DemoAdmin } from './demo-admin.js';
 
 const MAX_BODY_BYTES = 8192;
@@ -124,6 +125,8 @@ export class PondroObject extends DurableObject {
 
 export default {
   async fetch(request, env) {
+    const unauthorized = await authenticate(request, env);
+    if (unauthorized) return unauthorized;
     const url = new URL(request.url);
     if (url.pathname === '/api/demo/reset') {
       if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
