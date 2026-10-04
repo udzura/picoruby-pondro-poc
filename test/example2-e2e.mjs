@@ -180,7 +180,20 @@ try {
   assert.deepEqual(await rpc('default', 'list', [], 'AICatalog'), []);
   assert.equal((await rpc('sage', 'configure', ['New Sage', 'A new personality.'])).created, true);
   assert.deepEqual(await rpc('default', 'list', [], 'AICatalog'), [{ id: 'sage', name: 'New Sage' }]);
-  console.log('PASS: example2 workerd WebSocket broadcasts, streamed AI replies, shared persona, room isolation, immutable prompt, removal/re-invitation, departure and restart persistence (mock AI)');
+  assert.equal((await rpc('tools', 'configure', ['Tools', 'Remember values.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent'])).profile.bot_type, 'agent');
+  const tools = await connect('tool-room', 'Human');
+  tools.send({ type: 'invite', ai_id: 'tools' });
+  await tools.wait(event => event.type === 'participants' && event.participants.length === 1);
+  tools.send({ type: 'say', text: 'remember color=青🌿' });
+  await tools.wait(event => event.type === 'notice' && event.text === 'tools used remember.');
+  await tools.wait(event => event.type === 'message' && event.entry.sender.kind === 'ai');
+  await tools.wait(event => event.type === 'ready');
+  await stop(); await start();
+  assert.equal((await rpc('tools', 'load')).bot_type, 'agent');
+  const resumedTools = await connect('tool-room', 'Returning');
+  resumedTools.send({ type: 'say', text: 'recall color' });
+  assert.match((await resumedTools.wait(event => event.type === 'message' && event.entry.sender.kind === 'ai')).entry.text, /青🌿/);
+  console.log('PASS: example2 WebSocket chat, agent tools, room memory, persona and restart persistence (mock AI)');
 } catch (error) {
   await delay(200); console.error(logs); throw error;
 } finally {

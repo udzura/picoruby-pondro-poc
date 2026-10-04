@@ -335,3 +335,58 @@ test('human and AI joins reach everyone in the room, without duplicate invites o
     assert.deepEqual(returning.events[0].history, []);
   } finally { w.destroy(); }
 });
+
+test('agent bots execute tools through real Wasm, persist room memory and coexist with ordinary bots', async () => {
+  const { createMockAI } = await import('../example2/mock-ai.js');
+  const w = world(createMockAI());
+  try {
+    const configured = await w.get('AIParticipant', 'tools').dispatch('http.rpc', {
+      method: 'configure', args: ['Tools', 'Remember requested values.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent']
+    });
+    assert.equal(configured.profile.bot_type, 'agent');
+    assert.equal((await w.configure('tools', 'Other', 'Other')).profile.bot_type, 'agent');
+    await w.configure('ordinary', 'Ordinary', 'Be kind.');
+    const human = await w.connect('memory', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'tools' });
+    await human.dispatch({ type: 'invite', ai_id: 'ordinary' });
+    await human.dispatch({ type: 'say', text: 'remember color=青🌿' });
+    assert.deepEqual(w.snapshots.get('AIChatRoom:memory').state.memory, { tools: { color: '青🌿' } });
+    assert.equal(human.events.some(event => event.text === 'tools used remember.'), true);
+    assert.equal(human.events.some(event => event.type === 'ai_error'), false);
+    assert.deepEqual(human.events.filter(event => event.type === 'message').map(event => event.entry.sender.id),
+      [human.id, 'tools', 'ordinary']);
+    w.restore('AIChatRoom', 'memory');
+    const restored = await w.connect('memory', 'Returning');
+    await restored.dispatch({ type: 'say', text: 'recall color' });
+    const reply = restored.events.findLast(event => event.type === 'message' && event.entry.sender.id === 'tools');
+    assert.match(reply.entry.text, /青🌿/);
+    const other = await w.connect('other-memory', 'Other');
+    await other.dispatch({ type: 'invite', ai_id: 'tools' });
+    await other.dispatch({ type: 'say', text: 'recall color' });
+    assert.match(other.events.findLast(event => event.type === 'message').entry.text, /null/);
+    assert.equal((await w.restore('AIParticipant', 'tools').dispatch('http.rpc', { method: 'profile' })).bot_type, 'agent');
+    await assert.rejects(w.get('AIChatRoom', 'memory').dispatch('rpc', { method: 'remember', args: [{ key: 'x', value: 'y' }] }), /not exported/);
+  } finally { w.destroy(); }
+});
+
+test('agent rejects unknown and invalid tools before execution and can handle the next message', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  let response = { tool_calls: [{ name: 'history', arguments: {} }] };
+  const w = world({ async run() { return response; } });
+  try {
+    await w.get('AIParticipant', 'tools').dispatch('http.rpc', {
+      method: 'configure', args: ['Tools', 'Use tools.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent']
+    });
+    const human = await w.connect('invalid-tools', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'tools' });
+    await human.dispatch({ type: 'say', text: 'Unknown tool' });
+    assert.match(human.events.findLast(event => event.type === 'ai_error').text, /Unknown tool/);
+    response = { tool_calls: [{ name: 'remember', arguments: { key: 'color', value: 42 } }] };
+    await human.dispatch({ type: 'say', text: 'Invalid arguments' });
+    assert.match(human.events.findLast(event => event.type === 'ai_error').text, /Invalid tool arguments/);
+    assert.deepEqual(w.snapshots.get('AIChatRoom:invalid-tools').state.memory, {});
+    response = { response: 'Recovered' };
+    await human.dispatch({ type: 'say', text: 'Try again' });
+    assert.equal(human.events.findLast(event => event.type === 'message').entry.text, 'Recovered');
+  } finally { w.destroy(); }
+});

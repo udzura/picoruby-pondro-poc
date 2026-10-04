@@ -519,3 +519,10 @@ fresh-VM reconstruction and a local server restart; actual Cloudflare idle
 hibernation with live connections and production memory usage require a deployed
 environment and have not been measured. No deployment is performed by setup,
 build or tests.
+
+## Agent harness
+
+`use Pondro::Agent` adds registered Ruby tools and a bounded `run!` loop.
+Memory remains ordinary `state`; response helpers keep the loop independent of
+SSE. See [pondro-agent](mrbgems/pondro-agent/README.md) for its API and event limits.
+Example 2 supports both ordinary chat bots and agent bots.

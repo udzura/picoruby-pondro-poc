@@ -207,3 +207,26 @@ npm run test:example2:e2e
 Real-Wasm tests cover concurrent rooms sharing one AI, immutable personality,
 room isolation, streaming, error recovery and storage restoration. The workerd
 test uses mock AI for real WebSockets, invitations, UTF-8, departure and restart.
+
+## Tool-capable agent bots
+
+Choose **Agent** in the Bot type field before creating a new AI ID. Existing IDs
+keep their original type; the default is Chat bot. Agents run serially in the
+room using `Pondro::Agent#run!` and the JSON Workers AI helper. Ordinary bots
+retain streamed chat replies. Use a model that supports tool calls.
+
+Agents have `remember(key, value)` and `recall(key)` tools implemented in Ruby.
+Memory is `state :memory, default: {}`, scoped by room and AI ID. It survives
+restart and removal/re-invitation without mixing rooms or personas. Each AI can
+store 32 keys (1–64 bytes each) with values up to 256 bytes. Tool-use notices
+appear in the chat. There is no implicit memory DSL or model declaration.
+
+With mock AI, try `remember color=blue`, followed by `recall color`. The mock
+produces real tool requests and reads their results, without inference traffic.
+Runs allow eight model calls. Failure is reported as `ai_error` and the next
+message remains usable. Tools already executed can retain state when the room
+catches the error; external side effects cannot be rolled back.
+
+See [the agent API](../mrbgems/pondro-agent/README.md) for response helpers,
+including the optional SSE helper and custom stream protocols. Real-model
+function calling has not been verified by the automated mock tests.

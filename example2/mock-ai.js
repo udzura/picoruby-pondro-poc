@@ -4,6 +4,14 @@ export function createMockAI() {
     async run(model, input) {
       const system = input.messages.find(message => message.role === 'system')?.content ?? '';
       const latest = input.messages.at(-1)?.content ?? '';
+      if (input.tools?.length) {
+        if (input.messages.at(-1)?.role === 'tool') return { response: `[Mock agent] Tool result: ${latest}` };
+        const match = latest.match(/remember ([^=\s]+)=(.*)/i);
+        if (match) return { tool_calls: [{ name: 'remember', arguments: { key: match[1], value: match[2] } }] };
+        const recall = latest.match(/recall (\S+)/i);
+        if (recall) return { tool_calls: [{ name: 'recall', arguments: { key: recall[1] } }] };
+        return { response: `[Mock agent] ${latest}. Try: remember color=blue / recall color` };
+      }
       const response = `[Mock AI] ${system.split('\n')[0]}\nI heard: ${latest}`;
       const encoder = new TextEncoder();
       const frames = response.match(/[\s\S]{1,16}/gu).map(part => `data: ${JSON.stringify({ response: part })}\n\n`);

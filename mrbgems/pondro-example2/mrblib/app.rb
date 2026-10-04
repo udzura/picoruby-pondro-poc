@@ -7,8 +7,9 @@ class AICatalog < Example2::Object
     entries.values
   end
 
-  def register(ai_id, display_name)
+  def register(ai_id, display_name, bot_type = 'chat')
     entries[ai_id] = { 'id' => ai_id, 'name' => display_name }
+    entries[ai_id]['bot_type'] = bot_type if bot_type == 'agent'
     nil
   end
 end
@@ -21,32 +22,35 @@ class AIParticipant < Example2::Object
   state :name, default: nil
   state :prompt, default: nil
   state :model, default: nil
+  state :bot_type, default: 'chat'
   state :rooms, default: []
   rpc :configure, :profile, :load, http: true
   rpc :join, :leave
 
   # The first configuration wins. Reusing an AI ID loads its original persona.
-  def configure(display_name, personality, selected_model = MODEL)
+  def configure(display_name, personality, selected_model = MODEL, selected_type = 'chat')
     return { 'created' => false, 'profile' => load } if prompt
     validate_text(display_name, 128, 'AI name')
     validate_text(personality, 4096, 'Personality prompt')
     raise ArgumentError, 'Unsupported AI model' unless MODELS.include?(selected_model)
+    raise ArgumentError, 'Unsupported bot type' unless ['chat', 'agent'].include?(selected_type)
     self.name = display_name
     self.prompt = personality
     self.model = selected_model
-    AICatalog['default'].register(id, name).await
+    self.bot_type = selected_type
+    AICatalog['default'].register(id, name, bot_type).await
     { 'created' => true, 'profile' => profile }
   end
 
   def profile
     return nil unless prompt
-    { 'id' => id, 'name' => name, 'prompt' => prompt, 'model' => model || MODEL, 'rooms' => rooms }
+    { 'id' => id, 'name' => name, 'prompt' => prompt, 'model' => model || MODEL, 'bot_type' => bot_type, 'rooms' => rooms }
   end
 
   # Loading also indexes personas created before the catalog was introduced.
   def load
     return nil unless prompt
-    AICatalog['default'].register(id, name).await
+    AICatalog['default'].register(id, name, bot_type).await
     profile
   end
 
@@ -78,10 +82,37 @@ end
 class AIChatRoom < Example2::Object
   use Pondro::WebSocket
   use Pondro::Bindings
+  use Pondro::Agent
+
+  state :memory, default: {}
   state :participants, default: []
   state :messages, default: []
   state :sequence, default: 0
   rpc :history
+
+  tool :remember, description: 'Remember a short key and value in this room for this AI', parameters: {
+    'type' => 'object', 'properties' => { 'key' => { 'type' => 'string' }, 'value' => { 'type' => 'string' } },
+    'required' => ['key', 'value'], 'additionalProperties' => false
+  }
+  tool :recall, description: 'Read a remembered value by key in this room for this AI', parameters: {
+    'type' => 'object', 'properties' => { 'key' => { 'type' => 'string' } },
+    'required' => ['key'], 'additionalProperties' => false
+  }
+
+  def remember(args)
+    raise ArgumentError, 'Memory key must be 1 to 64 bytes' if args['key'].empty? || args['key'].bytesize > 64
+    raise ArgumentError, 'Memory value must be at most 256 bytes' if args['value'].bytesize > 256
+    values = memory[@agent_id] ||= {}
+    raise ArgumentError, 'Memory is limited to 32 keys' if !values.key?(args['key']) && values.length >= 32
+    values[args['key']] = args['value']
+    broadcast_now({ 'type' => 'notice', 'text' => @agent_id + ' used remember.' })
+    { 'saved' => true }
+  end
+
+  def recall(args)
+    broadcast_now({ 'type' => 'notice', 'text' => @agent_id + ' used recall.' })
+    (memory[@agent_id] || {})[args['key']]
+  end
 
   def history
     messages
@@ -133,6 +164,7 @@ class AIChatRoom < Example2::Object
     raise ArgumentError, 'A room can have at most 4 AI participants' if participants.length >= 4
     profile = AIParticipant[ai_id].join(id).await
     participants << { 'id' => ai_id, 'name' => profile['name'] }
+    participants.last['bot_type'] = 'agent' if profile['bot_type'] == 'agent'
     sockets.each { |client| client.send(JSON.generate({ 'type' => 'participants', 'participants' => participants })) }
     announce_join({ 'kind' => 'ai', 'id' => ai_id, 'name' => profile['name'] })
   end
@@ -163,7 +195,7 @@ class AIChatRoom < Example2::Object
       raise ArgumentError, 'Message must be 1 to 2000 bytes'
     end
     entry = entry_for({ 'kind' => 'human', 'id' => socket.id, 'name' => human_name(socket) }, text)
-    remember(entry)
+    remember_message(entry)
     broadcast_now({ 'type' => 'message', 'entry' => entry })
     participants.each { |participant| reply(participant) }
     broadcast_now({ 'type' => 'ready' })
@@ -181,17 +213,25 @@ class AIChatRoom < Example2::Object
       if ['@cf/google/gemma-4-26b-a4b-it', '@cf/zai-org/glm-4.7-flash'].include?(profile['model'])
         input['chat_template_kwargs'] = { 'enable_thinking' => false }
       end
-      stream = bindings.AI.stream!(:generate, profile['model'], input)
-      Pondro::Example2::SSE.each_delta(stream, diagnostics) do |delta|
+      emit = lambda do |delta|
         raise Pondro::BindingError, 'AI reply exceeded 16 KiB' if entry['text'].bytesize + delta.bytesize > 16_384
         entry['text'] += delta
         broadcast_now({ 'type' => 'ai_delta', 'sequence' => entry['sequence'], 'delta' => delta })
+      end
+      if profile['bot_type'] == 'agent'
+        @agent_id = profile['id']
+        result = run!(bindings.AI, profile['model'], input: input['messages'], max_steps: 8,
+                      options: input.reject { |key, _| key == 'messages' }, &emit)
+        entry['text'] = result['text']
+      else
+        stream = bindings.AI.stream!(:generate, profile['model'], input)
+        Pondro::Example2::SSE.each_delta(stream, diagnostics, &emit)
       end
       if entry['text'].empty?
         detail = diagnostics['finish_reason'] || 'unknown'
         raise Pondro::BindingError, 'AI returned an empty reply (finish_reason=' + detail + ', reasoning_bytes=' + diagnostics['reasoning_bytes'].to_s + ')'
       end
-      remember(entry)
+      remember_message(entry)
       broadcast_now({ 'type' => 'message', 'entry' => entry })
     rescue StandardError => error
       begin
@@ -206,6 +246,7 @@ class AIChatRoom < Example2::Object
       end
       broadcast_now({ 'type' => 'ai_error', 'sequence' => entry['sequence'], 'text' => error.message })
     ensure
+      @agent_id = nil
       begin
         stream.close if stream
       rescue Pondro::BindingError
@@ -228,7 +269,7 @@ class AIChatRoom < Example2::Object
     { 'sequence' => sequence, 'sender' => sender, 'text' => text }
   end
 
-  def remember(entry)
+  def remember_message(entry)
     messages << entry
     messages.shift if messages.length > 50
   end

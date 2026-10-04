@@ -92,7 +92,7 @@ function participants(list) {
   if (!list.length) $('participants').append(translated('span', 'hint', admin ? 'noAI' : 'noAIGuest'));
   for (const ai of list) {
     const chip = element('span', 'participant');
-    const label = element('span', '', `✳ ${ai.name} · ${ai.id}`);
+    const label = element('span', '', `✳ ${ai.name} · ${ai.id}${ai.bot_type === 'agent' ? ' · Agent' : ''}`);
     const remove = translated('button', 'remove-ai', 'remove', { name: ai.name });
     remove.type = 'button';
     remove.dataset.i18nAria = 'removeLabel';
@@ -198,7 +198,7 @@ async function refreshCatalog() {
     placeholder.value = '';
     $('existing-ai').replaceChildren(placeholder);
     for (const ai of list) {
-      const option = element('option', '', `${ai.name} · ${ai.id}`);
+      const option = element('option', '', `${ai.name} · ${ai.id}${ai.bot_type === 'agent' ? ' · Agent' : ''}`);
       option.value = ai.id;
       $('existing-ai').append(option);
     }
@@ -221,12 +221,13 @@ async function loadAI(id, create = false) {
   try {
     let profile = await rpc(id, 'load');
     const existing = !!profile;
-    if (!profile && create) profile = (await rpc(id, 'configure', [name, prompt, $('model').value])).profile;
+    if (!profile && create) profile = (await rpc(id, 'configure', [name, prompt, $('model').value, $('bot-type').value])).profile;
     if ($('ai-id').value.trim() !== id) return;
     if (!profile) { localize($('ai-info'), 'missingAI'); return; }
     loadedAI = profile;
     $('ai-name').value = profile.name; $('personality').value = profile.prompt;
     $('model').value = profile.model; $('model').disabled = true;
+    $('bot-type').value = profile.bot_type || 'chat'; $('bot-type').disabled = true;
     $('ai-name').readOnly = true; $('personality').readOnly = true;
     plain($('ai-info'));
     $('ai-info').append(translated('span', '', existing ? 'loaded' : 'saved'), ' ',
@@ -239,7 +240,7 @@ async function loadAI(id, create = false) {
 
 $('ai-id').addEventListener('input', () => {
   loadedAI = null; $('existing-ai').value = ''; $('ai-name').readOnly = false; $('personality').readOnly = false;
-  $('model').disabled = false; controls();
+  $('model').disabled = false; $('bot-type').disabled = false; controls();
 });
 $('refresh-ai').addEventListener('click', refreshCatalog);
 $('existing-ai').addEventListener('change', () => {
@@ -273,7 +274,7 @@ $('confirm-reset').addEventListener('click', async () => {
     if (!response.ok) throw new Error(await response.text());
     entries.clear(); active.clear(); loadedAI = null; self = undefined;
     $('ai-form').reset(); $('message').value = '';
-    $('model').disabled = false;
+    $('model').disabled = false; $('bot-type').disabled = false;
     $('ai-name').readOnly = false; $('personality').readOnly = false;
     localize($('room-title'), 'chooseRoom'); localize($('mode'), 'mode');
     $('timeline').replaceChildren(); participants([]); plain($('chat-status'));

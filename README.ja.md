@@ -521,3 +521,10 @@ hibernationに対応するコールバックとattachmentの経路は実装し�
 実際のCloudflare上で、接続を維持したままidle hibernationする動作と、本番でのメモリ使用量は、
 デプロイした環境での検証が必要であり、まだ測定していません。
 setup、build、テストではデプロイを行いません。
+
+## Agentハーネス
+
+`use Pondro::Agent`でRubyのtool登録と、回数を制限した`run!`ループを追加できます。
+メモリには通常の`state`を使い、応答形式はヘルパーで扱うためSSEを前提にしません。
+APIとイベントの制限は[pondro-agent](mrbgems/pondro-agent/README.md)を参照してください。
+Example 2では通常のチャットBotとagent型Botを選択できます。

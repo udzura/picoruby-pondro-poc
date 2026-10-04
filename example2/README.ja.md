@@ -194,3 +194,23 @@ npm run test:example2:e2e
 実Wasmで共通AIを使う複数Roomの同時応答、初期性格の維持、履歴分離、逐次配信、
 エラー回復と保存状態の復元を確認します。workerdテストはmock AIで実WebSocket、
 招待、UTF-8、切断、再起動後の復元を確認します。
+
+## tool call対応のagent型Bot
+
+新しいAI IDを作成する前に、Botの種類から「エージェント」を選びます。既存IDの種類は
+変更せず、種類未指定のBotは通常のチャットBotとして扱います。agent型BotはRoom内で
+`Pondro::Agent#run!`とJSON応答のWorkers AIヘルパーを使い、直列に実行します。
+通常Botのストリーミング返信は維持します。tool callに対応するモデルを選んでください。
+
+Rubyで実装した`remember(key, value)`と`recall(key)`を利用できます。
+メモリは`state :memory, default: {}`で、RoomとAI IDごとに独立します。再起動や
+退出・再招待後も保持し、別Room・別AIとは共有しません。AIごとに32キーまで、キーは
+1〜64 bytes、値は256 bytesまでです。toolを使うとチャットに通知が出ます。
+
+mock版では`remember color=blue`、続いて`recall color`と発言すると、実際にRubyの
+toolを呼んで結果を受け取ります。推論通信はありません。モデル呼び出しは最大8回です。
+失敗は`ai_error`で通知し、次の発言を受け付けます。Roomが例外を捕捉するため、失敗までに
+実行したtoolのstate変更は保存される場合があります。外部操作は巻き戻せません。
+
+SSEや独自stream形式のヘルパーについては[agent API](../mrbgems/pondro-agent/README.md)を
+参照してください。実モデルのtool callはmockの自動テストでは未検証です。

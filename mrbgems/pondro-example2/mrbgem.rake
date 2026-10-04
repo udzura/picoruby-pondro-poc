@@ -7,4 +7,5 @@ MRuby::Gem::Specification.new('pondro-example2') do |spec|
   spec.add_dependency 'pondro-websocket'
   spec.add_dependency 'pondro-rpc'
   spec.add_dependency 'pondro-bindings'
+  spec.add_dependency 'pondro-agent'
 end
