@@ -15,26 +15,32 @@ end
 
 class AIParticipant < Example2::Object
   MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8'
+  MODELS = [MODEL, '@cf/zai-org/glm-4.7-flash', '@cf/qwen/qwen3-30b-a3b-fp8',
+            '@cf/meta/llama-3.2-3b-instruct', '@cf/openai/gpt-oss-20b',
+            '@cf/google/gemma-4-26b-a4b-it']
   state :name, default: nil
   state :prompt, default: nil
+  state :model, default: nil
   state :rooms, default: []
   rpc :configure, :profile, :load, http: true
   rpc :join, :leave
 
   # The first configuration wins. Reusing an AI ID loads its original persona.
-  def configure(display_name, personality)
+  def configure(display_name, personality, selected_model = MODEL)
     return { 'created' => false, 'profile' => load } if prompt
     validate_text(display_name, 128, 'AI name')
     validate_text(personality, 4096, 'Personality prompt')
+    raise ArgumentError, 'Unsupported AI model' unless MODELS.include?(selected_model)
     self.name = display_name
     self.prompt = personality
+    self.model = selected_model
     AICatalog['default'].register(id, name).await
     { 'created' => true, 'profile' => profile }
   end
 
   def profile
     return nil unless prompt
-    { 'id' => id, 'name' => name, 'prompt' => prompt, 'model' => MODEL, 'rooms' => rooms }
+    { 'id' => id, 'name' => name, 'prompt' => prompt, 'model' => model || MODEL, 'rooms' => rooms }
   end
 
   # Loading also indexes personas created before the catalog was introduced.

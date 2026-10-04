@@ -89,15 +89,18 @@ RPC calls to `clear` are rejected to avoid waiting for the calling event itself.
 The old inventory and dedicated namespace are not migrated automatically.
 
 1. Enter a Room ID and your name, then connect.
-2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.
-   Select a saved AI from the list to load its original name and personality.
+2. Enter an AI ID, name, personality prompt, and Workers AI model. Click
+   **Load or create AI**. Select a saved AI from the list to load its original
+   name, personality and model.
    Use **Refresh list** to see AI created in another browser.
 3. Click **Invite AI to this room**, then send a message.
 4. Open another tab in the same room to join as another human.
 5. Join a different room, load the same AI ID, and invite it there too.
 
-The first configuration of an AI ID wins. Existing IDs restore the saved name
-and prompt; use a new ID for a different personality. A room supports up to four
+The first configuration of an AI ID wins. Existing IDs restore the saved name,
+prompt and model; use a new ID to change the model or personality. Available
+models are Llama 3.1 8B, GLM-4.7 Flash, Qwen3 30B A3B, Llama 3.2 3B,
+OpenAI gpt-oss-20b and Gemma 4 26B A4B. A room supports up to four
 AIs, each responding once per human message, in invitation order.
 Use **Remove** on an AI's participant chip to remove it from the current room.
 Its personality, other rooms and existing messages remain available, and it can
@@ -115,9 +118,15 @@ npm run dev:example2
 
 `wrangler.jsonc` in this directory configures a remote AI binding. Inference uses
 Workers AI even though the Worker and DOs run locally, and counts toward usage.
-The model is `@cf/meta/llama-3.1-8b-instruct-fp8` with streaming and `max_tokens: 512`.
+The model selected during AI creation is used with streaming and `max_tokens: 512`.
+The `configure` RPC defaults to `@cf/meta/llama-3.1-8b-instruct-fp8` when its model argument is omitted.
 See [binding configuration](https://developers.cloudflare.com/workers-ai/configuration/bindings/)
-and [model documentation](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/).
+and model documentation for [Llama 3.1 8B](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/),
+[GLM-4.7 Flash](https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/),
+[Qwen3 30B A3B](https://developers.cloudflare.com/workers-ai/models/qwen3-30b-a3b-fp8/) and
+[Llama 3.2 3B](https://developers.cloudflare.com/workers-ai/models/llama-3.2-3b-instruct/) and
+[OpenAI gpt-oss-20b](https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/) and
+[Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/).
 Automated tests never run real inference.
 
 ## Design

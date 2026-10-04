@@ -84,15 +84,18 @@ bindingで動き、専用bindingやJSでの自動登録処理はありません�
 古い管理一覧・専用namespaceからの自動移行は行いません。
 
 1. Room IDと自分の表示名を入力して接続します。
-2. AI ID、表示名、性格を指定して**Load or create AI**を押します。
-   作成済みのAIはリストから選ぶだけで、保存済みの名前と性格を読み込めます。
+2. AI ID、表示名、性格、Workers AIモデルを指定して**Load or create AI**を押します。
+   作成済みのAIはリストから選ぶだけで、保存済みの名前・性格・モデルを読み込めます。
    別の画面で作成したAIは「一覧を更新」で取得できます。
 3. **Invite AI to this room**で招待し、発言します。
 4. 同じRoomを別タブで開くと、他の人間として参加できます。
 5. 別Roomで同じAI IDを読み込んで招待すると、そのAIが両方へ参加します。
 
-AI IDの最初の設定を保存します。既存IDの表示名・性格は上書きせず復元します。
-別の性格は新しいAI IDで試してください。1 Roomに最大4体のAIを招待でき、
+AI IDの最初の設定を保存します。既存IDの表示名・性格・モデルは上書きせず復元します。
+モデルの変更には新しいAI IDを使ってください。選べるモデルはLlama 3.1 8B、GLM-4.7 Flash、
+Qwen3 30B A3B、Llama 3.2 3B、OpenAI gpt-oss-20b、Gemma 4 26B A4Bです。
+別の性格は新しいAI IDで試してください。
+1 Roomに最大4体のAIを招待でき、
 人間の発言ごとに招待順で1回ずつ応答します。
 参加AIの**Remove**ボタンで、そのRoomから退出させられます。性格、他Roomへの参加、
 過去の発言は保持し、再招待もできます。AIの応答中は退出ボタンを無効にします。
@@ -107,10 +110,16 @@ npm run dev:example2
 ```
 
 このディレクトリの`wrangler.jsonc`はremoteなAI bindingを設定しています。
-Worker・DOがローカルでもWorkers AIを使い、利用量に加算されます。モデルは
-`@cf/meta/llama-3.1-8b-instruct-fp8`で、streamと`max_tokens: 512`を指定します。
+Worker・DOがローカルでもWorkers AIを使い、利用量に加算されます。作成時に選んだモデルへ
+streamと`max_tokens: 512`を指定します。RPCの`configure`でモデルを省略した場合は
+`@cf/meta/llama-3.1-8b-instruct-fp8`を使います。
 [公式binding設定](https://developers.cloudflare.com/workers-ai/configuration/bindings/)と
-[モデル仕様](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/)も参照してください。
+[Llama 3.1 8B](https://developers.cloudflare.com/workers-ai/models/llama-3.1-8b-instruct-fp8/)、
+[GLM-4.7 Flash](https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/)、
+[Qwen3 30B A3B](https://developers.cloudflare.com/workers-ai/models/qwen3-30b-a3b-fp8/)、
+[Llama 3.2 3B](https://developers.cloudflare.com/workers-ai/models/llama-3.2-3b-instruct/)、
+[OpenAI gpt-oss-20b](https://developers.cloudflare.com/workers-ai/models/gpt-oss-20b/)、
+[Gemma 4 26B A4B](https://developers.cloudflare.com/ai/models/%40cf/google/gemma-4-26b-a4b-it/)の仕様も参照してください。
 自動テストは実際の推論を呼びません。
 
 ## 採用した設計
