@@ -1,4 +1,4 @@
-class AICatalog < Pondro::Object
+class AICatalog < Example2::Object
   state :entries, default: {}
   rpc :list, http: true
   rpc :register
@@ -13,7 +13,7 @@ class AICatalog < Pondro::Object
   end
 end
 
-class AIParticipant < Pondro::Object
+class AIParticipant < Example2::Object
   MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8'
   state :name, default: nil
   state :prompt, default: nil
@@ -69,7 +69,7 @@ class AIParticipant < Pondro::Object
   end
 end
 
-class AIChatRoom < Pondro::Object
+class AIChatRoom < Example2::Object
   use Pondro::WebSocket
   use Pondro::Bindings
   state :participants, default: []

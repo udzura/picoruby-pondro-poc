@@ -23,7 +23,59 @@ Pondro.register('CoreOnly', CoreOnly)
 Pondro.register('Child', Child)
 Pondro.register('PrivateChild', PrivateChild)
 
+class LifecycleObject < Pondro::Object
+  state :boots, default: []
+  rpc :inspect_session, :fail
+
+  def do_initialize
+    boots << 'initialize'
+    @session = 'new'
+    ::Object.new # A hook's return value is ignored, even when it is not JSON.
+  end
+
+  def do_resume
+    boots << 'resume'
+    @session = 'restored'
+  end
+
+  def inspect_session
+    @visits = (@visits || 0) + 1
+    { 'session' => @session, 'visits' => @visits, 'context' => @context['label'] }
+  end
+
+  def fail
+    boots << 'discarded'
+    @effects << { 'type' => 'discarded' }
+    raise 'event failed'
+  end
+end
+Pondro.register('LifecycleObject', LifecycleObject)
+
 class CoreTest < Minitest::Test
+  def test_lifecycle_keeps_instance_variables_but_restores_state_context_and_effects
+    saved = {}
+    run = lambda do |type, method = nil, label = nil|
+      result = JSON.parse(Pondro.dispatch(JSON.generate({ 'class' => 'LifecycleObject', 'id' => 'lifecycle-test',
+        'managed' => true, 'type' => type, 'state' => saved, 'context' => { 'label' => label },
+        'payload' => { 'method' => method } })))
+      saved = result['state'] if result['ok']
+      result
+    end
+    assert run.call('lifecycle.initialize')['ok']
+    first = run.call('rpc', 'inspect_session', 'first')
+    assert_equal({ 'session' => 'new', 'visits' => 1, 'context' => 'first' }, first['value'])
+    refute run.call('rpc', 'fail')['ok']
+    second = run.call('rpc', 'inspect_session', 'second')
+    assert_equal({ 'session' => 'new', 'visits' => 2, 'context' => 'second' }, second['value'])
+    assert_equal ['initialize'], saved['boots']
+    assert_empty second['effects']
+    assert run.call('lifecycle.resume')['ok']
+    resumed = run.call('rpc', 'inspect_session')
+    assert_equal 'restored', resumed['value']['session']
+    assert_equal 1, resumed['value']['visits']
+    assert_equal ['initialize', 'resume'], saved['boots']
+    refute run.call('rpc', 'do_initialize')['ok']
+  end
   def dispatch(klass = 'CoreOnly', method = 'append', args = ['a'], state = {}, type = 'rpc')
     JSON.parse(Pondro.dispatch(JSON.generate({ 'class' => klass, 'id' => 'test', 'type' => type,
       'state' => state, 'payload' => { 'method' => method, 'args' => args } })))

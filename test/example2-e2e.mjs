@@ -160,6 +160,8 @@ try {
   const refused = await authenticatedFetch(`${base}/api/demo/reset`, { method: 'POST' });
   assert.equal(refused.status, 403);
   assert.equal((await rpc('sage', 'profile')).name, 'Sage');
+  restored.send({ type: 'say', text: 'Reset while AI is replying. ' + 'x'.repeat(800) });
+  await restored.wait(event => event.type === 'ai_start');
   const closures = [solo.socket, restored.socket].map(socket => once(socket, 'close'));
   const cleared = await authenticatedFetch(`${base}/api/demo/reset?admin=1`, { method: 'POST' });
   assert.equal(cleared.status, 200, await cleared.clone().text());

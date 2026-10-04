@@ -78,6 +78,43 @@ If your global npm or Emscripten cache is not writable, use a writable cache
 directory (for example `npm ci --cache /tmp/pondro-npm-cache` or
 `EM_CACHE=/tmp/pondro-em-cache npm run build`).
 
+## Initialization and resume hooks
+
+`Pondro::Object` provides empty `do_initialize` and `do_resume` methods.
+Before the first event of a host activation, after restoring state and resolving
+the Ruby class and ID, the host calls `do_initialize` for a new object or
+`do_resume` for an initialized object restored from storage. Hooks do not run on
+every event within the same activation.
+
+```ruby
+class MyObject < Pondro::Object
+  state :settings, default: {}
+
+  def do_initialize
+    self.settings = { 'label' => 'My object' }
+    @session_label = settings['label']
+  end
+
+  def do_resume
+    @session_label = settings['label']
+  end
+end
+```
+
+Hook return values are ignored. Hook state and the initialization marker are
+committed before the normal event, in a separate transaction. Failed hooks or
+commits are retried on the next event; a failed normal event does not repeat an
+already committed hook. Resetting storage makes the next activation initialize
+again. Existing snapshots without a marker count as initialized.
+
+The Ruby instance survives for the host activation, so instance variables remain
+available between events. They disappear when the DO is recreated; use `state`
+for persistent values. Durable state, context and effects are refreshed each
+event. Failed events roll back durable state, not ordinary instance variables.
+Socket and Stream handles remain event-scoped and must not be retained across
+events. Hooks can await Futures; external operations are not rolled back with
+local state.
+
 ## Ruby objects
 
 ```ruby

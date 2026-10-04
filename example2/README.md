@@ -62,9 +62,28 @@ users and deletes storage for every PONDRO in this Worker: AI, catalog, all room
 history and counters, including human-only rooms. Active events finish before
 deletion. IDs can then be reused. Language preferences and Cloudflare credentials
 are retained. POST `/api/demo/reset?admin=1` is the demo reset endpoint; the query
-is not authentication. A `DemoAdmin` DO persists an inventory of objects used by
-HTTP, WebSocket and internal RPC. Objects predating this feature must be accessed
-once to enter the inventory. External KV, D1 and R2 binding data is not deleted.
+is not authentication. `ObjectRegistry < Pondro::Object` persists the managed
+objects activated within this Example 2 app in `state :objects`. External KV,
+D1 and R2 binding data is not deleted.
+
+Inventory and registration live in `mrbgems/pondro-example2/mrblib/00_objects.rb`.
+`AICatalog`, `AIParticipant` and `AIChatRoom` inherit `Example2::Object`, whose
+`do_initialize` and `do_resume` hooks call
+`ObjectRegistry['default'].register(identity).await`. Call `super` when overriding
+these hooks to retain registration. The original playground Counter, ChatRoom
+and binding probes also include the registration module, enabled by the
+Example 2 context; the root playground does not register objects. The registry
+inherits directly from `Pondro::Object` to avoid registering itself. Objects
+that have not activated are absent from the inventory.
+
+The registry's `register`, `list` and `clear` methods are internal RPCs. It uses
+the ordinary `PONDRO` binding without a dedicated binding or automatic JS
+registration. Ruby's `clear` awaits each reset through a Future, then empties
+the inventory after all succeed. A failed reset preserves the inventory for
+retry. JS handles socket closure, storage deletion and immediate rejection of
+registrations during reset. Reset must start outside an object event; internal
+RPC calls to `clear` are rejected to avoid waiting for the calling event itself.
+The old inventory and dedicated namespace are not migrated automatically.
 
 1. Enter a Room ID and your name, then connect.
 2. Enter an AI ID, name, and personality prompt. Click **Load or create AI**.

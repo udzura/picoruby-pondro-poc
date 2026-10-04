@@ -51,12 +51,30 @@ module Pondro
 
     def initialize(id, state, context)
       @id = id
+      __restore_event(state, context)
+    end
+
+    def __restore_event(state, context)
       @state = JSON.parse(JSON.generate(self.class.defaults)).merge(state)
       @context = context
       @effects = []
     end
 
+    def do_initialize
+    end
+
+    def do_resume
+    end
+
     def dispatch(type, payload)
+      if type == 'lifecycle.initialize'
+        do_initialize
+        return nil
+      end
+      if type == 'lifecycle.resume'
+        do_resume
+        return nil
+      end
       return self.class.adapters.map { |adapter| adapter.adapter_name } if type == 'capabilities'
       if type == 'rpc' || type == 'http.rpc'
         method = payload['method']
@@ -86,6 +104,7 @@ module Pondro
   end
 
   @classes = {}
+  @objects = {}
 
   def self.register(name, klass)
     @classes[name] = klass
@@ -98,14 +117,22 @@ module Pondro
     raise DispatchError, 'Unregistered Pondro class'
   end
 
-  # The host restores state on every event. A failed event has no persistent
-  # mutations or effects, even if the VM itself remains alive.
+  # Managed objects survive for one host activation. Restore durable state and
+  # event context each time, while keeping ordinary instance variables alive.
   def self.dispatch(json)
     input = JSON.parse(json)
     klass = @classes[input['class']]
     raise DispatchError, 'Unknown Pondro class' unless klass
-    object = klass.new(input['id'], input['state'] || {}, input['context'] || {})
+    key = JSON.generate([input['class'], input['id']])
+    lifecycle = input['type'] == 'lifecycle.initialize' || input['type'] == 'lifecycle.resume'
+    object = input['managed'] && !lifecycle ? @objects[key] : nil
+    if object
+      object.__restore_event(input['state'] || {}, input['context'] || {})
+    else
+      object = klass.new(input['id'], input['state'] || {}, input['context'] || {})
+    end
     value = object.dispatch(input['type'], input['payload'] || {})
+    @objects[key] = object if input['managed']
     JSON.generate({ 'ok' => true, 'value' => value,
                     'state' => object.snapshot, 'effects' => object.effects })
   rescue HttpAccessError => error

@@ -61,9 +61,25 @@ UIにもmockと表示します。
 人間だけのRoomも対象です。進行中のイベントの完了を待ってから削除し、その後は
 同じIDで作り直せます。表示言語とCloudflareの認証情報は保持します。
 POST `/api/demo/reset?admin=1`がデモ用の初期化APIです。クエリは認証ではありません。
-`DemoAdmin` DOがHTTP・WebSocket・内部RPCで使ったオブジェクトを永続記録します。
-機能導入前のオブジェクトは、一度アクセスして記録する必要があります。
-KV・D1・R2などの外部bindingの内容は対象外です。
+`ObjectRegistry < Pondro::Object`が、このexample2で起動した管理対象のオブジェクトを
+`state :objects`で永続記録します。KV・D1・R2などの外部bindingの内容は対象外です。
+
+一覧管理と登録処理は`mrbgems/pondro-example2/mrblib/00_objects.rb`にあります。
+`AICatalog`・`AIParticipant`・`AIChatRoom`は共通基底クラス`Example2::Object`を継承し、
+`do_initialize`と`do_resume`から`ObjectRegistry['default'].register(identity).await`を呼びます。
+対象クラスでhookを上書きするときは`super`を呼んで登録処理を維持してください。
+元のplaygroundのCounter・ChatRoom・binding検証用オブジェクトにも同じ登録moduleを
+適用し、example2のcontextで有効にします。ルートのplaygroundでは登録を行いません。
+管理オブジェクト自身は直接`Pondro::Object`を継承するため、自己登録しません。
+未起動のオブジェクトは一覧に含まれません。
+
+`ObjectRegistry`の`register`・`list`・`clear`は内部RPCです。管理役も通常の`PONDRO`
+bindingで動き、専用bindingやJSでの自動登録処理はありません。Rubyの`clear`が各対象の
+削除をFutureで待ち、すべて成功したら一覧を空にします。途中で失敗した場合は一覧が
+保持され、再実行できます。JSには接続の切断・ストレージ削除と、削除中の登録を即座に
+拒否するガードが残ります。全削除はオブジェクトのイベント外から開始し、内部RPC経由の
+`clear`は呼び出し元自身のイベント完了を待つことを防ぐため拒否します。
+古い管理一覧・専用namespaceからの自動移行は行いません。
 
 1. Room IDと自分の表示名を入力して接続します。
 2. AI ID、表示名、性格を指定して**Load or create AI**を押します。

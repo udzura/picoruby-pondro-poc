@@ -6,14 +6,11 @@ import { WebSocketAdapter } from './adapters/websocket.js';
 import { BindingAdapter } from './adapters/bindings.js';
 import { createMockAI } from '../example2/mock-ai.js';
 import { authenticate } from './basic-auth.js';
-export { DemoAdmin } from './demo-admin.js';
 
 const MAX_BODY_BYTES = 8192;
-const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AICatalog', 'AIParticipant', 'AIChatRoom'];
-
-function demoAdmin(env) {
-  return env.DEMO_ADMIN.get(env.DEMO_ADMIN.idFromName('default'));
-}
+const CLASSES = ['Counter', 'ChatRoom', 'BindingProbe', 'StreamProbe', 'GenericProbe', 'AICatalog', 'AIParticipant', 'AIChatRoom', 'ObjectRegistry'];
+const REGISTRY = { class: 'ObjectRegistry', id: 'default' };
+const REGISTRY_KEY = JSON.stringify([REGISTRY.class, REGISTRY.id]);
 
 function route(url) {
   const match = url.pathname.match(/^\/(api|ws)\/([^/]+)\/([^/]+)$/);
@@ -51,16 +48,21 @@ async function readPayload(request) {
 export class PondroObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.clearing = false;
     const mock = env.EXAMPLE2_AI_MODE === 'mock';
     const bindingEnv = mock ? { ...env, AI: createMockAI() } : env;
     const bindings = new BindingAdapter(bindingEnv, { CACHE: 'kv', DB: 'd1', BUCKET: 'r2', AI: 'ai' });
-    const example2 = { context: () => ({ ai_mode: mock ? 'mock' : 'live' }), handles: () => false };
+    const example2 = { context: () => ({ ai_mode: mock ? 'mock' : 'live',
+      object_registry: env.EXAMPLE2_AI_MODE ? REGISTRY.id : null }), handles: () => false };
     this.host = new PondroHost(ctx, new RubyRuntime(module), [bindings, example2], async (request, chain) => {
       if (!CLASSES.includes(request.class) || typeof request.id !== 'string' || !request.id || request.id.length > 128) {
         throw new Error('Invalid remote PONDRO identity');
       }
       const id = env.PONDRO.idFromName(JSON.stringify([request.class, request.id]));
-      await demoAdmin(env).register({ class: request.class, id: request.id });
+      if (request.kind === 'object.reset') {
+        if (chain.at(-1) !== REGISTRY_KEY) throw new Error('Object reset is restricted to ObjectRegistry');
+        return env.PONDRO.get(id).reset();
+      }
       // Timeout also bounds independently initiated distributed wait cycles.
       let timer;
       try {
@@ -76,6 +78,16 @@ export class PondroObject extends DurableObject {
   }
 
   invoke(identity, payload, chain = []) {
+    if (identity.class === REGISTRY.class && identity.id === REGISTRY.id) {
+      // Reject immediately: queueing registration behind clear could deadlock
+      // an active object event that clear is waiting to reset.
+      if (this.clearing) return Promise.reject(new Error('Demo reset is in progress'));
+      if (payload.method === 'clear') {
+        if (chain.length) return Promise.reject(new Error('Demo reset must start outside an object event'));
+        this.clearing = true;
+        return this.host.dispatch(identity, 'rpc', payload, chain).finally(() => { this.clearing = false; });
+      }
+    }
     return this.host.dispatch(identity, 'rpc', payload, chain);
   }
 
@@ -131,7 +143,8 @@ export default {
     if (url.pathname === '/api/demo/reset') {
       if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
       if (url.searchParams.get('admin') !== '1') return new Response('Requires admin=1', { status: 403 });
-      try { return Response.json(await demoAdmin(env).clear()); }
+      const registry = env.PONDRO.get(env.PONDRO.idFromName(REGISTRY_KEY));
+      try { return Response.json(await registry.invoke(REGISTRY, { method: 'clear', args: [] })); }
       catch (error) {
         console.error('Demo reset failed', error);
         return new Response('Demo reset failed', { status: 500 });
@@ -143,11 +156,6 @@ export default {
       catch (error) { return new Response(error.message, { status: 400 }); }
       if (!target) return new Response('Not found', { status: 404 });
       const id = env.PONDRO.idFromName(JSON.stringify([target.class, target.id]));
-      try { await demoAdmin(env).register({ class: target.class, id: target.id }); }
-      catch (error) {
-        console.error('Demo registration failed', error);
-        return new Response('Demo reset is in progress', { status: 503 });
-      }
       return env.PONDRO.get(id).fetch(request);
     }
     return env.ASSETS.fetch(request);

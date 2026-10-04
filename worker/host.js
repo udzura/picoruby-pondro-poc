@@ -7,6 +7,7 @@ export class PondroHost {
     this.remote = remote;
     this.bindings = bindings;
     this.tail = Promise.resolve();
+    this.activeIdentity = null;
   }
 
   dispatch(identity, type, payload, chain = []) {
@@ -20,18 +21,34 @@ export class PondroHost {
   }
 
   reset() {
-    const run = this.tail.then(() => this.ctx.storage.deleteAll());
+    const run = this.tail.then(async () => {
+      await this.ctx.storage.deleteAll();
+      this.activeIdentity = null;
+    });
     this.tail = run.catch(() => {});
     return run;
   }
 
   async run(identity, type, payload, chain) {
-    const stored = this.ctx.storage.kv.get('pondro');
+    let stored = this.ctx.storage.kv.get('pondro');
     if (stored && (stored.class !== identity.class || stored.id !== identity.id)) {
       throw new Error('PONDRO identity mismatch');
     }
+    const key = JSON.stringify([identity.class, identity.id]);
+    if (this.activeIdentity && this.activeIdentity !== key) throw new Error('PONDRO identity mismatch');
+    if (!this.activeIdentity) {
+      // Existing snapshots predate the explicit marker and count as initialized.
+      const resume = stored && stored.initialized !== false;
+      await this.runEvent(identity, resume ? 'lifecycle.resume' : 'lifecycle.initialize', {}, chain, stored?.state ?? {});
+      this.activeIdentity = key;
+      stored = this.ctx.storage.kv.get('pondro');
+    }
+    return this.runEvent(identity, type, payload, chain, stored?.state ?? {});
+  }
+
+  async runEvent(identity, type, payload, chain, state) {
     const result = await this.runtime.dispatch({
-      ...identity, type, payload, state: stored?.state ?? {},
+      ...identity, type, payload, state, managed: true,
       context: Object.assign({}, ...this.adapters.map(adapter => adapter.context()))
     }, request => {
       if (request.kind === 'socket') {
@@ -55,7 +72,7 @@ export class PondroHost {
     }
     // Only the local snapshot commit is transactional. No transaction spans await.
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.kv.put('pondro', { ...identity, state: result.state });
+      this.ctx.storage.kv.put('pondro', { ...identity, initialized: true, state: result.state });
     });
     // External effects are best effort after commit, not an atomic outbox.
     for (const effect of result.effects) {

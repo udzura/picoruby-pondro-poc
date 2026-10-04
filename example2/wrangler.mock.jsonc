@@ -4,8 +4,8 @@
   "compatibility_date": "2026-10-03",
   "assets": { "directory": "../public", "binding": "ASSETS", "run_worker_first": true },
   "secrets": { "required": ["BASIC_AUTH_USER", "BASIC_AUTH_PASSWORD"] },
-  "durable_objects": { "bindings": [{ "name": "PONDRO", "class_name": "PondroObject" }, { "name": "DEMO_ADMIN", "class_name": "DemoAdmin" }] },
+  "durable_objects": { "bindings": [{ "name": "PONDRO", "class_name": "PondroObject" }] },
   "vars": { "EXAMPLE2_AI_MODE": "mock" },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PondroObject"] }, { "tag": "v2", "new_sqlite_classes": ["DemoAdmin"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PondroObject"] }],
   "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }]
 }

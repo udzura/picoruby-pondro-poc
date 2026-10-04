@@ -27,8 +27,9 @@ function world(ai) {
         kv: { get: () => snapshots.get(key), put: (_, value) => snapshots.set(key, value) }, transactionSync: fn => fn()
       } };
       const binding = new BindingAdapter({ AI: ai }, { AI: 'ai' });
+      const profile = { context: () => ({ object_registry: 'default' }), handles: () => false };
       const runtime = new RubyRuntime(module);
-      const host = new PondroHost(ctx, runtime, [binding], (request, chain) =>
+      const host = new PondroHost(ctx, runtime, [binding, profile], (request, chain) =>
         get(request.class, request.id).dispatch('rpc', { method: request.method, args: request.args }, chain), binding);
       host.adapters.push(new WebSocketAdapter(ctx, host));
       hosts.set(key, { runtime, sockets, host, dispatch: (type, payload, chain) => host.dispatch({ class: klass, id }, type, payload, chain) });
@@ -55,6 +56,28 @@ function world(ai) {
     destroy() { for (const session of hosts.values()) session.runtime.destroy(); }
   };
 }
+
+test('Ruby lifecycle registers Example 2 and playground objects through ordinary RPC without self-registration', async () => {
+  const w = world({ async run() { throw new Error('Registration must not invoke AI'); } });
+  const list = () => w.get('ObjectRegistry', 'default').dispatch('rpc', { method: 'list' });
+  try {
+    assert.deepEqual(await list(), []);
+    await w.configure('sage', 'Sage', 'Original prompt.');
+    await w.connect('garden', 'Alice');
+    await w.get('Counter', 'total').dispatch('rpc', { method: 'value' });
+    const expected = [
+      { class: 'AIParticipant', id: 'sage' }, { class: 'AICatalog', id: 'default' },
+      { class: 'AIChatRoom', id: 'garden' }, { class: 'Counter', id: 'total' }
+    ];
+    assert.deepEqual(await list(), expected);
+    await w.get('Counter', 'total').dispatch('rpc', { method: 'increment' });
+    w.restore('AIParticipant', 'sage');
+    await w.get('AIParticipant', 'sage').dispatch('rpc', { method: 'profile' });
+    assert.deepEqual(await list(), expected);
+    w.restore('ObjectRegistry', 'default');
+    assert.deepEqual(await list(), expected);
+  } finally { w.destroy(); }
+});
 
 test('AI catalog persists creations, loads saved personas and indexes legacy AI without duplicates', async () => {
   const w = world({ async run() { throw new Error('Listing must not trigger inference'); } });

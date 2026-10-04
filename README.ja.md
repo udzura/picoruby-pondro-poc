@@ -81,6 +81,42 @@ npmやEmscriptenのグローバルキャッシュに書き込めない場合は�
 ディレクトリを指定してください。例えば、`npm ci --cache /tmp/pondro-npm-cache`や
 `EM_CACHE=/tmp/pondro-em-cache npm run build`を利用できます。
 
+## 起動と復帰のhook
+
+`Pondro::Object`には、基底クラスで空の`do_initialize`と`do_resume`があります。
+保存済みの初期化情報がない場合は`do_initialize`、DOが再生成されて保存済みstateを
+復元する場合は`do_resume`を呼びます。同じDOの稼働中は、イベントごとには呼びません。
+RubyのclassとIDを受け取る最初のイベントの直前に実行します。
+
+```ruby
+class MyObject < Pondro::Object
+  state :settings, default: {}
+
+  def do_initialize
+    self.settings = { 'label' => 'My object' }
+    @session_label = settings['label']
+  end
+
+  def do_resume
+    @session_label = settings['label']
+  end
+end
+```
+
+hookには復元済みのstateと現在のcontextが渡され、戻り値は無視します。
+成功したhookのstateと初期化フラグは、通常イベントとは別に先に保存します。
+hookやその保存に失敗した場合は、次のイベントで再試行します。
+後続イベントが失敗しても、成功・保存済みのhookは繰り返しません。
+全データをクリアしたオブジェクトは、次回`do_initialize`からやり直します。
+既存の初期化フラグがない保存済みsnapshotは、初期化済みとして扱います。
+
+RubyオブジェクトはDOの稼働中、同じインスタンスを使います。インスタンス変数は
+稼働中だけ保持され、DOの再生成で失われます。永続化する値は`state`を使ってください。
+state・context・送信effectsはイベントごとに復元・更新します。失敗時のロールバックは
+永続stateが対象で、通常のインスタンス変数には適用しません。
+SocketやStreamのhandleはイベント単位なので、次のイベントへ保持しないでください。
+hookもFutureをawaitできますが、外部への操作は永続stateと一緒にはロールバックされません。
+
 ## Rubyオブジェクト
 
 ```ruby
