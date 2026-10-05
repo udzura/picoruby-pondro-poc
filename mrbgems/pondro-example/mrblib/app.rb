@@ -179,3 +179,27 @@ class GenericProbe < Pondro::Object
   end
 end
 Pondro.register('GenericProbe', GenericProbe)
+
+# Internal RPC probe for the Web Crypto binding; no HTTP export is needed.
+class SecureRandomProbe < Pondro::Object
+  rpc :bytes, :hex, :number, :integer_number
+
+  def hex(length = nil)
+    SecureRandom.hex(length)
+  end
+
+  def bytes(length = nil)
+    SecureRandom.random_bytes(length).unpack('C*')
+  end
+
+  def number(limit = 0)
+    value = SecureRandom.random_number(limit)
+    # JSON numbers cannot preserve every int64 value; return its decimal text.
+    { 'value' => value.to_s, 'integer' => value.is_a?(Integer) }
+  end
+
+  def integer_number(limit)
+    number(limit.to_i)
+  end
+end
+Pondro.register('SecureRandomProbe', SecureRandomProbe)

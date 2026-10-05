@@ -98,6 +98,11 @@ class AIChatRoom < Example2::Object
     'type' => 'object', 'properties' => { 'key' => { 'type' => 'string' } },
     'required' => ['key'], 'additionalProperties' => false
   }
+  tool :roll_dice, openai_compat: true, description: 'Roll one fair die with the specified number of sides using Web Crypto; default 6 sides', parameters: {
+    'type' => 'object', 'properties' => {
+      'sides' => { 'type' => 'integer', 'description' => 'Number of sides, from 1 to 9007199254740991; default 6' }
+    }, 'required' => [], 'additionalProperties' => false
+  }
   tool :japan_weather, openai_compat: true,
     description: 'Fetch current daily forecasts for Japan from Open-Meteo. Prefer a romanized city name; specify the Japanese prefecture to disambiguate.', parameters: {
     'type' => 'object', 'properties' => {
@@ -106,6 +111,16 @@ class AIChatRoom < Example2::Object
       'days' => { 'type' => 'integer', 'enum' => [1, 2, 3, 4, 5, 6, 7], 'description' => 'Number of days starting today; default 3' }
     }, 'required' => ['location'], 'additionalProperties' => false
   }
+
+  def roll_dice(args)
+    sides = args.fetch('sides', 6)
+    unless sides.is_a?(Integer) && sides >= 1 && sides <= 9_007_199_254_740_991
+      raise ArgumentError, 'Sides must be an integer from 1 to 9007199254740991'
+    end
+    result = { 'sides' => sides, 'value' => SecureRandom.random_number(sides) + 1 }
+    broadcast_now({ 'type' => 'notice', 'text' => @agent_id + ' used roll_dice.' })
+    result
+  end
 
   def japan_weather(args)
     result = Example2::Weather.forecast(bindings, args)
@@ -282,6 +297,7 @@ class AIChatRoom < Example2::Object
   def conversation(profile)
     system = profile['prompt'] + "\nYour display name is " + profile['name'] + '. Reply to the latest message in this shared chat.'
     if profile['bot_type'] == 'agent'
+      system += "\nWhen asked to roll dice, always call roll_dice with the requested number of sides (default 6) and report its returned value. Never invent a dice result."
       system += "\nFor Japanese weather forecasts, always call japan_weather. Translate city names to romanized names and provide the Japanese prefecture when known. For ambiguous or missing locations, clarify or retry with a more precise name. Report the resolved location, dates and units, cite Open-Meteo, and never invent forecasts or missing values. weather_code uses WMO codes; precipitation_sum is rainfall/snowfall amount, not probability."
     end
     [{ 'role' => 'system', 'content' => system }] + messages.last(20).map do |entry|

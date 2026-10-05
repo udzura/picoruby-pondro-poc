@@ -235,6 +235,14 @@ See [the agent API](../mrbgems/pondro-agent/README.md) for response helpers,
 including the optional SSE helper and custom stream protocols. Real-model
 function calling has not been verified by the automated mock tests.
 
+Agents also have `roll_dice(sides?)` to roll one die with a specified number of
+sides (default: 6). It uses `SecureRandom.random_number(sides) + 1` through the
+Web Crypto binding and returns `{ "sides": 20, "value": 1 }` (value: 1–sides).
+Sides must be an integer from 1 to 9,007,199,254,740,991, so results remain exact
+JSON numbers. Try `roll dice 20`, `roll d100`, or “20面のサイコロを振って”
+with either a live agent or the offline mock. Existing agent IDs gain this tool
+automatically; a tool-use notice appears in the chat.
+
 
 Agent bots also have `japan_weather(location, prefecture?, days?)`. Ask, for example,
 “福岡市の明日までの天気を教えて”. The tool uses `bindings.fetch` to combine
@@ -249,5 +257,5 @@ Prefer romanized city names and a Japanese prefecture, e.g. `location: "Fukuoka"
 prefecture: "福岡県"`. Multiple matches require clarification; missing matches
 require a more precise name. Replies identify the resolved location and cite
 Open-Meteo (geocoding: GeoNames). API failures appear as AI errors.
-The offline mock AI only selects remember/recall; weather requires a live,
+The offline mock AI selects remember/recall/roll_dice; weather requires a live,
 tool-capable model and network access to Open-Meteo.

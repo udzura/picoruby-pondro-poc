@@ -352,6 +352,34 @@ curl -X POST http://localhost:8787/api/BindingProbe/note \
 upstreamとの共通mgem抽出は今後の対象です。現段階では再現可能なJSのsnapshotとして
 依存を取り込み、読み出しstreamは現在のイベントが所有します。
 
+## Web Crypto経由のSecureRandom
+
+`pondro-bindings` mgemは既存のbinding/Future ABIを経由して、ホストの
+`globalThis.crypto.getRandomValues`を使う`SecureRandom`を提供します。
+resource bindingの登録や`use Pondro::Bindings`は不要です。
+イベント処理中（ライフサイクルhookを含む）に呼び出してください。
+
+```ruby
+SecureRandom.random_number       # Float in 0.0...1.0
+SecureRandom.random_number(100)  # Integer in 0...100, without modulo bias
+SecureRandom.random_number(2.5)  # Float in 0.0...2.5
+SecureRandom.random_bytes        # 16-byte binary String
+SecureRandom.random_bytes(32)    # 32-byte binary String
+SecureRandom.hex                 # 32-character lowercase hexadecimal String
+SecureRandom.hex(32)             # 64-character lowercase hexadecimal String
+```
+
+`random_bytes(nil)`は16バイト、長さ0は空文字列を返します。
+長さは整数のみ受け付け、負数では`ArgumentError`になります。
+`hex`は`random_bytes`を小文字の16進文字列に変換し、指定したバイト数の
+2倍の文字数を返します。デフォルト長と引数の検証は`random_bytes`と同じです。
+Web Cryptoの呼び出し上限に合わせて最大65,536バイトずつ取得し、JSON ABIを
+通してバイナリを保持します。合計サイズはVMのメモリに制約されます。
+`random_number`は整数と有限のFloatに対応し、0以下では`0.0...1.0`を返します。
+整数の上限はVMの符号付き64ビット整数の範囲に対応します。
+Range引数と引数の暗黙変換には未対応です。
+ホスト側の失敗は`Pondro::BindingError`となり、疑似乱数へのfallbackはありません。
+
 ## RubyからのHTTP fetch
 
 `use Pondro::Bindings`したオブジェクトでは、resource bindingの登録なしで通常のHTTP

@@ -75,6 +75,15 @@ export class BindingAdapter {
 
   async invoke(request) {
     if (typeof request.operation !== 'string') throw new Error('Invalid binding operation');
+    if (request.operation === 'crypto.random_bytes') {
+      if (request.binding !== '' || !Array.isArray(request.args) || request.args.length !== 1 ||
+          typeof request.args[0] !== 'string' || !/^(0|[1-9][0-9]*)$/.test(request.args[0])) {
+        throw new Error('Invalid random byte arguments');
+      }
+      const length = Number(request.args[0]);
+      if (!Number.isInteger(length) || length > 65536) throw new Error('Random byte limit is 65536');
+      return { bytes: Array.from(globalThis.crypto.getRandomValues(new Uint8Array(length))) };
+    }
     if (request.operation === 'fetch' || request.operation === 'fetch.stream') return this.invokeFetch(request);
     if (request.operation.startsWith('stream.')) {
       if (request.binding !== '' || !['stream.read_partial', 'stream.readline', 'stream.read_all', 'stream.close'].includes(request.operation)) {

@@ -10,7 +10,11 @@ export function createMockAI() {
         if (match) return { tool_calls: [{ name: 'remember', arguments: { key: match[1], value: match[2] } }] };
         const recall = latest.match(/recall (\S+)/i);
         if (recall) return { tool_calls: [{ name: 'recall', arguments: { key: recall[1] } }] };
-        return { response: `[Mock agent] ${latest}. Try: remember color=blue / recall color` };
+        if (/roll.*\b(?:die|dice|d\d+)\b|サイコロ/i.test(latest)) {
+          const sides = latest.match(/(\d+)\s*(?:面|[- ]?sided)|\bd(\d+)\b|roll(?: a| the)? (?:die|dice)\s+(\d+)\b/i);
+          return { tool_calls: [{ name: 'roll_dice', arguments: sides ? { sides: Number(sides.slice(1).find(value => value !== undefined)) } : {} }] };
+        }
+        return { response: `[Mock agent] ${latest}. Try: remember color=blue / recall color / roll dice 20` };
       }
       const response = `[Mock AI] ${system.split('\n')[0]}\nI heard: ${latest}`;
       const encoder = new TextEncoder();

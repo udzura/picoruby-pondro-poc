@@ -219,6 +219,14 @@ toolを呼んで結果を受け取ります。推論通信はありません。�
 SSEや独自stream形式のヘルパーについては[agent API](../mrbgems/pondro-agent/README.md)を
 参照してください。実モデルのtool callはmockの自動テストでは未検証です。
 
+`roll_dice(sides?)`で面数を指定してサイコロを1個振れます。省略時は6面です。
+Web Crypto binding経由の`SecureRandom.random_number(sides) + 1`を使い、
+`{ "sides": 20, "value": 1 }`（valueは1〜指定した面数）を返します。
+JSONの数値を正確に保つため、面数は1〜9,007,199,254,740,991の整数に限定します。
+live agentまたはoffline mockで`roll dice 20`、`roll d100`、
+「20面のサイコロを振って」と発言してください。
+既存のagent型botにも自動で追加され、チャットにtoolの使用通知が出ます。
+
 
 agent型botは`japan_weather(location, prefecture?, days?)`も利用できます。
 「福岡市の明日までの天気を教えて」などと質問してください。
@@ -233,5 +241,5 @@ agent型botは`japan_weather(location, prefecture?, days?)`も利用できます
 日本語の都道府県名を推奨します。同名の候補が複数ある場合は確認を促し、
 見つからない場合は地名の再指定を促します。回答には検索で解決した地域と
 Open-Meteo（地名データ: GeoNames）の出典を含めます。APIの通信失敗は
-AIエラーとして表示します。offline mock AIが選択するtoolはremember/recallのみです。
+AIエラーとして表示します。offline mock AIが選択するtoolはremember/recall/roll_diceです。
 天気の利用にはtool対応のliveモデルとOpen-Meteoへの通信が必要です。

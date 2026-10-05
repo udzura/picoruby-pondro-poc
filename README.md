@@ -347,6 +347,34 @@ production KV consistency may return a previous value after a write.
 A shared upstream mgem extraction remains future work; the dependency is currently
 a reproducible JS snapshot. Readable streams are owned by the current event.
 
+## SecureRandom via Web Crypto
+
+The `pondro-bindings` mgem provides `SecureRandom` through the existing
+binding/Future ABI and the host's `globalThis.crypto.getRandomValues`.
+No resource binding registration or `use Pondro::Bindings` is required.
+Call these methods during an event (including lifecycle hooks):
+
+```ruby
+SecureRandom.random_number       # Float in 0.0...1.0
+SecureRandom.random_number(100)  # Integer in 0...100, without modulo bias
+SecureRandom.random_number(2.5)  # Float in 0.0...2.5
+SecureRandom.random_bytes        # 16-byte binary String
+SecureRandom.random_bytes(32)    # 32-byte binary String
+SecureRandom.hex                 # 32-character lowercase hexadecimal String
+SecureRandom.hex(32)             # 64-character lowercase hexadecimal String
+```
+
+`random_bytes(nil)` uses 16 bytes; zero returns an empty string, and negative
+lengths raise `ArgumentError`. `hex` converts `random_bytes` to lowercase hex,
+returning twice the requested byte length, with the same defaults and validation.
+Byte lengths must be integers. Requests are split into
+chunks of at most 65,536 bytes to respect Web Crypto's per-call quota and preserve
+binary bytes through the JSON ABI. Total size is limited by the VM's memory.
+`random_number` accepts integers and finite floats; non-positive limits use
+`0.0...1.0`. Integer limits support the VM's signed 64-bit range. Range arguments
+and implicit argument coercion are not implemented. Host failures raise
+`Pondro::BindingError`; no pseudo-random fallback is used.
+
 ## HTTP fetch from Ruby
 
 Objects declaring `use Pondro::Bindings` can issue ordinary HTTP requests without

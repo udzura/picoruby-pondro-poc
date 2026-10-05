@@ -188,6 +188,14 @@ try {
   await tools.wait(event => event.type === 'notice' && event.text === 'tools used remember.');
   await tools.wait(event => event.type === 'message' && event.entry.sender.kind === 'ai');
   await tools.wait(event => event.type === 'ready');
+  tools.events.length = 0;
+  tools.send({ type: 'say', text: '20面のサイコロを振って' });
+  await tools.wait(event => event.type === 'notice' && event.text === 'tools used roll_dice.');
+  const diceReply = await tools.wait(event => event.type === 'message' && event.entry.sender.kind === 'ai');
+  const dice = JSON.parse(diceReply.entry.text.split('Tool result: ')[1]);
+  assert.equal(dice.sides, 20);
+  assert.ok(Number.isInteger(dice.value) && dice.value >= 1 && dice.value <= 20);
+  await tools.wait(event => event.type === 'ready');
   await stop(); await start();
   assert.equal((await rpc('tools', 'load')).bot_type, 'agent');
   const resumedTools = await connect('tool-room', 'Returning');

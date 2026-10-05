@@ -369,6 +369,37 @@ test('agent bots execute tools through real Wasm, persist room memory and coexis
   } finally { w.destroy(); }
 });
 
+test('agent dice tool returns Web Crypto results through the real Wasm and mock model loop', async (t) => {
+  const { createMockAI } = await import('../example2/mock-ai.js');
+  let calls = 0;
+  t.mock.method(globalThis.crypto, 'getRandomValues', bytes => {
+    assert.equal(bytes.length, 1);
+    return bytes.fill([0, 5, 19, 99, 0][calls++]);
+  });
+  const w = world(createMockAI());
+  try {
+    await w.get('AIParticipant', 'dice').dispatch('http.rpc', {
+      method: 'configure', args: ['Dice', 'Roll dice when asked.', '@cf/meta/llama-3.1-8b-instruct-fp8', 'agent']
+    });
+    const human = await w.connect('dice-room', 'Human');
+    await human.dispatch({ type: 'invite', ai_id: 'dice' });
+    for (const [text, sides, value] of [
+      ['roll dice', 6, 1], ['サイコロを振って', 6, 6], ['20面のサイコロを振って', 20, 20],
+      ['roll dice 100', 100, 100], ['roll d1', 1, 1]
+    ]) {
+      await human.dispatch({ type: 'say', text });
+      const reply = human.events.findLast(event => event.type === 'message' && event.entry.sender.id === 'dice');
+      assert.deepEqual(JSON.parse(reply.entry.text.split('Tool result: ')[1]), { sides, value });
+    }
+    assert.equal(calls, 5);
+    assert.equal(human.events.filter(event => event.text === 'dice used roll_dice.').length, 5);
+    assert.equal(human.events.some(event => event.type === 'ai_error'), false);
+    await assert.rejects(w.get('AIChatRoom', 'dice-room').dispatch('rpc', {
+      method: 'roll_dice', args: [{}]
+    }), /not exported/);
+  } finally { w.destroy(); }
+});
+
 test('agent rejects unknown and invalid tools before execution and can handle the next message', async (t) => {
   t.mock.method(console, 'error', () => {});
   let response = { tool_calls: [{ name: 'history', arguments: {} }] };
@@ -385,6 +416,12 @@ test('agent rejects unknown and invalid tools before execution and can handle th
     await human.dispatch({ type: 'say', text: 'Invalid arguments' });
     assert.match(human.events.findLast(event => event.type === 'ai_error').text, /Invalid tool arguments/);
     assert.deepEqual(w.snapshots.get('AIChatRoom:invalid-tools').state.memory, {});
+    for (const sides of [0, -1, 1.5, '20', null, 9007199254740992]) {
+      response = { tool_calls: [{ name: 'roll_dice', arguments: { sides } }] };
+      await human.dispatch({ type: 'say', text: 'Invalid dice sides' });
+      assert.match(human.events.findLast(event => event.type === 'ai_error').text, /Invalid tool arguments|Sides must|outside the supported JSON range/);
+    }
+    assert.equal(human.events.some(event => event.text === 'tools used roll_dice.'), false);
     response = { response: 'Recovered' };
     await human.dispatch({ type: 'say', text: 'Try again' });
     assert.equal(human.events.findLast(event => event.type === 'message').entry.text, 'Recovered');
